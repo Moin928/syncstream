@@ -7,9 +7,12 @@ export class SpringWebSocketProvider {
     username,
     onUsersChange,
     onCursorChange,
-    onUserLeave
+    onUserLeave,
+    onSelectionChange,
+    onConnectionStateChange
   ) {
     this.clientId = crypto.randomUUID()
+
     this.room = room
     this.ydoc = ydoc
     this.username = username
@@ -17,29 +20,42 @@ export class SpringWebSocketProvider {
     this.onUsersChange = onUsersChange
     this.onCursorChange = onCursorChange
     this.onUserLeave = onUserLeave
+    this.onSelectionChange = onSelectionChange
+    this.onConnectionStateChange =
+      onConnectionStateChange
 
     this.users = []
 
-    this.socket = new WebSocket(
-      `ws://localhost:8080/ws?room=${encodeURIComponent(room)}&clientId=${encodeURIComponent(this.clientId)}`
-    )
+    this.socket = null
 
-    this.socket.binaryType = "arraybuffer"
+    this.intentionalDisconnect = false
+    this.reconnectTimer = null
+    this.reconnectAttempt = 0
 
-    this.handleUpdate = (update, origin) => {
+    this.handleUpdate = (
+      update,
+      origin
+    ) => {
       if (
         origin === this ||
-        this.socket.readyState !== WebSocket.OPEN
+        !this.socket ||
+        this.socket.readyState !==
+          WebSocket.OPEN
       ) {
         return
       }
 
-      const data = new Uint8Array(
-        1 + update.length
-      )
+      const data =
+        new Uint8Array(
+          1 + update.length
+        )
 
       data[0] = 0
-      data.set(update, 1)
+
+      data.set(
+        update,
+        1
+      )
 
       this.socket.send(data)
     }
@@ -49,83 +65,221 @@ export class SpringWebSocketProvider {
       this.handleUpdate
     )
 
-    this.socket.onopen = () => {
-      console.log(
-        `Connected to room: ${room}`
+    this.connect()
+  }
+
+  connect() {
+    if (
+      this.intentionalDisconnect
+    ) {
+      return
+    }
+
+    if (
+      this.socket &&
+      (
+        this.socket.readyState ===
+          WebSocket.OPEN ||
+        this.socket.readyState ===
+          WebSocket.CONNECTING
       )
+    ) {
+      return
+    }
 
-      const join = {
-        action: "join",
-        clientId: this.clientId,
-        username: this.username
-      }
+    this.setConnectionState(
+      "CONNECTING"
+    )
 
-      this.sendPresence(join)
-
-      const request = new Uint8Array(37)
-
-      request[0] = 1
-
-      const clientIdBytes =
-        new TextEncoder().encode(
+    const socket =
+      new WebSocket(
+        `ws://localhost:8080/ws?room=${encodeURIComponent(
+          this.room
+        )}&clientId=${encodeURIComponent(
           this.clientId
-        )
-
-      request.set(
-        clientIdBytes,
-        1
+        )}`
       )
 
-      this.socket.send(request)
-    }
+    this.socket = socket
 
-    this.socket.onmessage = (event) => {
-      const data = new Uint8Array(
-        event.data
-      )
+    socket.binaryType =
+      "arraybuffer"
 
-      if (data.length === 0) {
+    socket.onopen = () => {
+      if (
+        socket !== this.socket
+      ) {
         return
       }
 
-      const messageType = data[0]
-
-      if (messageType === 0) {
-        const update = data.slice(1)
-
-        Y.applyUpdate(
-          this.ydoc,
-          update,
-          this
-        )
-
-        return
-      }
-
-      if (messageType === 1) {
-        this.handleSyncRequest(data)
-        return
-      }
-
-      if (messageType === 2) {
-        this.handleSyncResponse(data)
-        return
-      }
-
-      if (messageType === 3) {
-        this.handlePresence(data)
-        return
-      }
-    }
-
-    this.socket.onclose = () => {
       console.log(
-        `Disconnected from room: ${room}`
+        `Connected to room: ${this.room}`
       )
+
+      this.reconnectAttempt = 0
+
+      this.setConnectionState(
+        "CONNECTED"
+      )
+
+      this.sendJoin()
+
+      this.requestSync()
+    }
+
+    socket.onmessage = (
+      event
+    ) => {
+      if (
+        socket !== this.socket
+      ) {
+        return
+      }
+
+      this.handleMessage(event)
+    }
+
+    socket.onerror = () => {
+      if (
+        socket !== this.socket
+      ) {
+        return
+      }
+
+      console.error(
+        "WebSocket connection error"
+      )
+    }
+
+    socket.onclose = () => {
+      if (
+        socket !== this.socket
+      ) {
+        return
+      }
+
+      console.log(
+        `Disconnected from room: ${this.room}`
+      )
+
+      if (
+        this.intentionalDisconnect
+      ) {
+        return
+      }
+
+      this.setConnectionState(
+        "RECONNECTING"
+      )
+
+      this.scheduleReconnect()
     }
   }
 
-  handleSyncRequest(data) {
+  sendJoin() {
+    const join = {
+      action: "join",
+      clientId: this.clientId,
+      username: this.username
+    }
+
+    this.sendPresence(join)
+  }
+
+  requestSync() {
+    if (
+      !this.socket ||
+      this.socket.readyState !==
+        WebSocket.OPEN
+    ) {
+      return
+    }
+
+    const request =
+      new Uint8Array(37)
+
+    request[0] = 1
+
+    const clientIdBytes =
+      new TextEncoder().encode(
+        this.clientId
+      )
+
+    request.set(
+      clientIdBytes,
+      1
+    )
+
+    this.socket.send(request)
+  }
+
+  handleMessage(event) {
+    const data =
+      new Uint8Array(
+        event.data
+      )
+
+    if (data.length === 0) {
+      return
+    }
+
+    const messageType =
+      data[0]
+
+    if (
+      messageType === 0
+    ) {
+      const update =
+        data.slice(1)
+
+      Y.applyUpdate(
+        this.ydoc,
+        update,
+        this
+      )
+
+      return
+    }
+
+    if (
+      messageType === 1
+    ) {
+      this.handleSyncRequest(
+        data
+      )
+
+      return
+    }
+
+    if (
+      messageType === 2
+    ) {
+      this.handleSyncResponse(
+        data
+      )
+
+      return
+    }
+
+    if (
+      messageType === 3
+    ) {
+      this.handlePresence(
+        data
+      )
+    }
+
+    if (
+      messageType === 4
+    ) {
+      this.handleSyncComplete(data)
+      return
+    }
+  }
+
+  handleSyncRequest(
+    data
+  ) {
     const targetClientId =
       new TextDecoder().decode(
         data.slice(1, 37)
@@ -136,9 +290,10 @@ export class SpringWebSocketProvider {
         this.ydoc
       )
 
-    const response = new Uint8Array(
-      37 + update.length
-    )
+    const response =
+      new Uint8Array(
+        37 + update.length
+      )
 
     response[0] = 2
 
@@ -158,14 +313,19 @@ export class SpringWebSocketProvider {
     )
 
     if (
+      this.socket &&
       this.socket.readyState ===
-      WebSocket.OPEN
+        WebSocket.OPEN
     ) {
-      this.socket.send(response)
+      this.socket.send(
+        response
+      )
     }
   }
 
-  handleSyncResponse(data) {
+  handleSyncResponse(
+    data
+  ) {
     const targetClientId =
       new TextDecoder().decode(
         data.slice(1, 37)
@@ -188,7 +348,48 @@ export class SpringWebSocketProvider {
     )
   }
 
-  handlePresence(data) {
+  handleSyncComplete(data) {
+  const targetClientId =
+    new TextDecoder().decode(
+      data.slice(1, 37)
+    )
+
+  if (
+    targetClientId !==
+    this.clientId
+  ) {
+    return
+  }
+
+  const update =
+    Y.encodeStateAsUpdate(
+      this.ydoc
+    )
+
+  const message =
+    new Uint8Array(
+      1 + update.length
+    )
+
+  message[0] = 0
+
+  message.set(
+    update,
+    1
+  )
+
+  if (
+    this.socket &&
+    this.socket.readyState ===
+      WebSocket.OPEN
+  ) {
+    this.socket.send(message)
+  }
+}
+
+  handlePresence(
+    data
+  ) {
     try {
       const json =
         new TextDecoder().decode(
@@ -259,6 +460,17 @@ export class SpringWebSocketProvider {
 
       if (
         presence.action ===
+        "selection"
+      ) {
+        this.onSelectionChange?.(
+          presence
+        )
+
+        return
+      }
+
+      if (
+        presence.action ===
         "leave"
       ) {
         this.users =
@@ -275,10 +487,7 @@ export class SpringWebSocketProvider {
         this.onUserLeave?.(
           presence.clientId
         )
-
-        return
       }
-
     } catch (error) {
       console.error(
         "Failed to handle presence message",
@@ -301,15 +510,48 @@ export class SpringWebSocketProvider {
       column
     }
 
-    this.sendPresence(cursor)
+    this.sendPresence(
+      cursor
+    )
   }
 
-  sendPresence(presence) {
+  sendSelection(
+    selection
+  ) {
+    const message = {
+      action: "selection",
+      clientId:
+        this.clientId,
+      username:
+        this.username,
+      selection
+    }
+
+    this.sendPresence(
+      message
+    )
+  }
+
+  sendPresence(
+    presence
+  ) {
+    if (
+      !this.socket ||
+      this.socket.readyState !==
+        WebSocket.OPEN
+    ) {
+      return
+    }
+
     const json =
-      JSON.stringify(presence)
+      JSON.stringify(
+        presence
+      )
 
     const jsonBytes =
-      new TextEncoder().encode(json)
+      new TextEncoder().encode(
+        json
+      )
 
     const message =
       new Uint8Array(
@@ -323,20 +565,79 @@ export class SpringWebSocketProvider {
       1
     )
 
+    this.socket.send(
+      message
+    )
+  }
+
+  scheduleReconnect() {
     if (
-      this.socket.readyState ===
-      WebSocket.OPEN
+      this.intentionalDisconnect ||
+      this.reconnectTimer
     ) {
-      this.socket.send(message)
+      return
     }
+
+    const delay =
+      Math.min(
+        1000 *
+          Math.pow(
+            2,
+            this.reconnectAttempt
+          ),
+        10000
+      )
+
+    this.reconnectAttempt++
+
+    console.log(
+      `Reconnecting in ${delay}ms`
+    )
+
+    this.reconnectTimer =
+      setTimeout(() => {
+        this.reconnectTimer =
+          null
+
+        this.connect()
+      }, delay)
+  }
+
+  setConnectionState(
+    state
+  ) {
+    this.onConnectionStateChange?.(
+      state
+    )
   }
 
   disconnect() {
+    this.intentionalDisconnect =
+      true
+
+    if (
+      this.reconnectTimer
+    ) {
+      clearTimeout(
+        this.reconnectTimer
+      )
+
+      this.reconnectTimer =
+        null
+    }
+
     this.ydoc.off(
       "update",
       this.handleUpdate
     )
 
-    this.socket.close()
+    if (this.socket) {
+      this.socket.close()
+      this.socket = null
+    }
+
+    this.setConnectionState(
+      "DISCONNECTED"
+    )
   }
 }
