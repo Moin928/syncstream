@@ -1,6 +1,6 @@
-# Code Mesh
+# SyncStream
 
-Code Mesh is a real time collaborative code editor where multiple users can work on the same code inside a shared room.
+SyncStream is a real time collaborative code editor where multiple users can work on the same code inside a shared room.
 
 The editor uses Monaco Editor for the coding experience, Yjs for collaborative document synchronization, and a custom WebSocket provider connected to a Spring Boot backend.
 
@@ -89,14 +89,14 @@ Presence information such as usernames, cursor positions, joins, and leaves is t
 ## Project Structure
 
 ```text
-code mesh
+SyncStream
 │
 ├── backend
 │   ├── src
 │   │   └── main
 │   │       ├── java
 │   │       │   └── com
-│   │       │       └── codemesh
+│   │       │       └── syncstream
 │   │       │           └── backend
 │   │       │               ├── controllers
 │   │       │               │   └── HealthController.java
