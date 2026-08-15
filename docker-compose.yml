@@ -1,0 +1,36 @@
+services:
+
+  mysql:
+    image: mysql:8.0
+    container_name: syncstream-mysql
+    restart: unless-stopped
+
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: syncstream
+
+    ports:
+      - "3307:3306"
+
+    volumes:
+      - syncstream-mysql-data:/var/lib/mysql
+
+  backend:
+    build:
+      context: ./backend
+    container_name: syncstream-backend
+    restart: unless-stopped
+
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/syncstream
+
+    ports:
+      - "8080:8080"
+
+    depends_on:
+      - mysql
+
+volumes:
+
+  syncstream-mysql-data:
