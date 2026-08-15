@@ -1,1 +1,3 @@
 syncstream_backup.sql
+.env
+syncstream_healthy_backup.sql
