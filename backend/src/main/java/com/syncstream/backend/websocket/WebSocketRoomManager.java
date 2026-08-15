@@ -5,8 +5,6 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import com.syncstream.backend.services.RoomPersistenceService;
 
-import java.util.Collections;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +14,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class WebSocketRoomManager {
 
+  private static final int COMPACTION_THRESHOLD = 100;
+
   private final Map<String, Set<WebSocketSession>> rooms =
     new ConcurrentHashMap<>();
 
@@ -24,16 +24,32 @@ public class WebSocketRoomManager {
 
   private final RoomPersistenceService persistenceService;
 
-  private final Map<String, AtomicLong> roomSequences =
-    new ConcurrentHashMap<>();
+  /*
+   * Represents one persisted Yjs update currently
+   * held in server memory like she was in my memory sed.
+   */
+  private record RoomUpdateState(
+    long id,
+    byte[] data
+  ) {}
 
   /*
-   * Stores Yjs updates for each room.
+   * Represents the complete in-memory state of a room.
    *
-   * The server does not need to understand Yjs hehehe.
-   * Yjs updates are kept as opaque byte arrays.
+   * The snapshot is kept separately from normal
+   * updates because it represents a compacted state.
    */
-  private final Map<String, List<byte[]>> roomUpdates =
+  private static class RoomState {
+
+    private byte[] snapshotData;
+
+    private long snapshotUpdateId;
+
+    private final List<RoomUpdateState> updates =
+      new ArrayList<>();
+  }
+
+  private final Map<String, RoomState> roomStates =
     new ConcurrentHashMap<>();
 
   public WebSocketRoomManager(
@@ -42,34 +58,56 @@ public class WebSocketRoomManager {
     this.persistenceService = persistenceService;
   }
 
-  private void loadRoomState(String room) {
-    if (roomUpdates.containsKey(room)) {
-      return;
+  private RoomState loadRoomState(
+    String room
+  ) {
+    RoomState existing =
+      roomStates.get(room);
+
+    if (existing != null) {
+      return existing;
     }
 
-    synchronized (roomUpdates) {
-      if (roomUpdates.containsKey(room)) {
-        return;
+    synchronized (roomStates) {
+      existing =
+        roomStates.get(room);
+
+      if (existing != null) {
+        return existing;
       }
 
-      List<byte[]> persistedUpdates =
-        persistenceService.loadUpdates(room);
+      RoomPersistenceService.RecoveryState recovery =
+        persistenceService.loadRecoveryState(room);
 
-      List<byte[]> updates =
-        Collections.synchronizedList(
-          new ArrayList<>()
+      RoomState state =
+        new RoomState();
+
+      if (recovery.snapshotData() != null) {
+        state.snapshotData =
+          recovery.snapshotData().clone();
+
+        state.snapshotUpdateId =
+          recovery.snapshotUpdateId();
+      }
+
+      for (
+        var update :
+        recovery.updates()
+      ) {
+        state.updates.add(
+          new RoomUpdateState(
+            update.getId(),
+            update.getUpdateData()
+          )
         );
-
-      for (byte[] update : persistedUpdates) {
-        updates.add(update.clone());
       }
 
-      roomUpdates.put(room, updates);
-
-      roomSequences.put(
+      roomStates.put(
         room,
-        new AtomicLong(updates.size())
+        state
       );
+
+      return state;
     }
   }
 
@@ -203,55 +241,128 @@ public class WebSocketRoomManager {
   /*
    * Store a Yjs update.
    */
-  public void addRoomUpdate(
+  public long addRoomUpdate(
     String room,
     byte[] update
   ) {
-    loadRoomState(room);
+    RoomState state =
+      loadRoomState(room);
 
-    long sequence =
-      roomSequences
-        .get(room)
-        .incrementAndGet();
+    /*
+     * Persist first because the database generates
+     * the update ID.
+     */
+    long updateId =
+      persistenceService.saveUpdate(
+        room,
+        update
+      );
 
-    List<byte[]> updates =
-      roomUpdates.get(room);
-
-    synchronized (updates) {
-      updates.add(update.clone());
+    synchronized (state.updates) {
+      state.updates.add(
+        new RoomUpdateState(
+          updateId,
+          update.clone()
+        )
+      );
     }
 
-    persistenceService.saveUpdate(
-      room,
-      update,
-      sequence
-    );
+    return updateId;
   }
 
   /*
-   * Return a snapshot of all known updates.
+   * return the current room state as Yjs updates.
+   *
+   * snapshot comes first like god, followed by updates that
+   * occurred after that snapshot.
    */
   public List<byte[]> getRoomUpdates(
     String room
   ) {
-    List<byte[]> updates =
-      roomUpdates.get(room);
+    RoomState state =
+      loadRoomState(room);
 
-    if (updates == null) {
-      return List.of();
-    }
+    synchronized (state.updates) {
+      List<byte[]> result =
+        new ArrayList<>();
 
-    synchronized (updates) {
-      List<byte[]> copy =
-        new ArrayList<>(
-          updates.size()
+      if (state.snapshotData != null) {
+        byte[] snapshot =
+          state.snapshotData;
+
+        byte[] snapshotMessage =
+          new byte[
+            1 + snapshot.length
+            ];
+
+        snapshotMessage[0] = 0;
+
+        System.arraycopy(
+          snapshot,
+          0,
+          snapshotMessage,
+          1,
+          snapshot.length
         );
 
-      for (byte[] update : updates) {
-        copy.add(update.clone());
+        result.add(
+          snapshotMessage
+        );
       }
 
-      return copy;
+      for (
+        RoomUpdateState update :
+        state.updates
+      ) {
+        result.add(
+          update.data().clone()
+        );
+      }
+
+      return result;
+    }
+  }
+
+  /*
+   * determine whether enough updates have accumulated
+   * since the current snapshot.
+   */
+  public boolean shouldCompact(
+    String room
+  ) {
+    RoomState state =
+      loadRoomState(room);
+
+    synchronized (state.updates) {
+      return state.updates.size() >=
+        COMPACTION_THRESHOLD;
+    }
+  }
+
+  /*
+   * replace the current in-memory snapshot and remove
+   * all updates already covered by that snapshot.
+   */
+  public void applySnapshot(
+    String room,
+    byte[] snapshotData,
+    long snapshotUpdateId
+  ) {
+    RoomState state =
+      loadRoomState(room);
+
+    synchronized (state.updates) {
+
+      state.snapshotData =
+        snapshotData.clone();
+
+      state.snapshotUpdateId =
+        snapshotUpdateId;
+
+      state.updates.removeIf(
+        update ->
+          update.id() <= snapshotUpdateId
+      );
     }
   }
 }
