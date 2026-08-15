@@ -1,16 +1,18 @@
 package com.syncstream.backend.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.syncstream.backend.services.RoomPersistenceService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.BinaryMessage;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.BinaryWebSocketHandler;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class CodeWebSocketHandler
@@ -26,16 +28,21 @@ public class CodeWebSocketHandler
   private static final int MESSAGE_SYNC_RESPONSE = 2;
   private static final int MESSAGE_PRESENCE = 3;
   private static final int MESSAGE_SYNC_COMPLETE = 4;
+  private static final int MESSAGE_SNAPSHOT_REQUEST = 5;
+  private static final int MESSAGE_SNAPSHOT_RESPONSE = 6;
 
   private final WebSocketRoomManager roomManager;
+  private final RoomPersistenceService persistenceService;
 
   private final ObjectMapper objectMapper =
     new ObjectMapper();
 
   public CodeWebSocketHandler(
-    WebSocketRoomManager roomManager
+    WebSocketRoomManager roomManager,
+    RoomPersistenceService persistenceService
   ) {
     this.roomManager = roomManager;
+    this.persistenceService = persistenceService;
   }
 
   @Override
@@ -80,10 +87,12 @@ public class CodeWebSocketHandler
       logger.warn(
         "Received empty binary message"
       );
+
       return;
     }
 
-    int messageType = data[0];
+    int messageType =
+      data[0];
 
     if (
       messageType ==
@@ -136,6 +145,30 @@ public class CodeWebSocketHandler
       return;
     }
 
+    if (
+      messageType ==
+        MESSAGE_SNAPSHOT_REQUEST
+    ) {
+      handleSnapshotRequest(
+        room,
+        session
+      );
+
+      return;
+    }
+
+    if (
+      messageType ==
+        MESSAGE_SNAPSHOT_RESPONSE
+    ) {
+      handleSnapshotResponse(
+        room,
+        data
+      );
+
+      return;
+    }
+
     logger.warn(
       "Unknown WebSocket message type: {}",
       messageType
@@ -147,23 +180,30 @@ public class CodeWebSocketHandler
     WebSocketSession sender,
     byte[] data
   ) {
-    /*
-     * Store the Yjs update on the server.
-     */
     roomManager.addRoomUpdate(
       room,
       data
     );
 
-    /*
-     * Broadcast it to every other
-     * connected client.
-     */
     broadcastUpdate(
       room,
       sender,
       data
     );
+
+    if (
+      roomManager.shouldCompact(room)
+    ) {
+      WebSocketSession snapshotSession =
+        getSnapshotSession(room);
+
+      if (snapshotSession != null) {
+        handleSnapshotRequest(
+          room,
+          snapshotSession
+        );
+      }
+    }
   }
 
   private void handleSyncRequest(
@@ -188,8 +228,7 @@ public class CodeWebSocketHandler
       );
 
     /*
-     * Only answer the client that
-     * requested synchronization.
+     * only the requesting client should receive the sync.
      */
     String requesterClientId =
       (String) requester
@@ -214,8 +253,7 @@ public class CodeWebSocketHandler
       );
 
     /*
-     * Send every stored Yjs update
-     * to the reconnecting client.
+     * replay the stored room state.
      */
     for (byte[] update : updates) {
       try {
@@ -233,10 +271,6 @@ public class CodeWebSocketHandler
       }
     }
 
-    /*
-     * Tell the client that the server's
-     * current update history has been sent.
-     */
     byte[] complete =
       new byte[1 + 36];
 
@@ -351,7 +385,7 @@ public class CodeWebSocketHandler
   @Override
   public void afterConnectionClosed(
     WebSocketSession session,
-    org.springframework.web.socket.CloseStatus status
+    CloseStatus status
   ) {
     String room =
       (String) session
@@ -606,4 +640,134 @@ public class CodeWebSocketHandler
 
     return message;
   }
+
+  private void handleSnapshotRequest(
+    String room,
+    WebSocketSession requester
+  ) {
+    long snapshotUpdateId =
+      persistenceService.getLatestUpdateId(
+        room
+      );
+
+    byte[] message =
+      new byte[
+        1 + Long.BYTES
+        ];
+
+    message[0] =
+      MESSAGE_SNAPSHOT_REQUEST;
+
+    java.nio.ByteBuffer
+      .wrap(
+        message,
+        1,
+        Long.BYTES
+      )
+      .putLong(
+        snapshotUpdateId
+      );
+
+    try {
+      requester.sendMessage(
+        new BinaryMessage(message)
+      );
+
+      logger.info(
+        "Snapshot request sent for room: {} with barrier: {}",
+        room,
+        snapshotUpdateId
+      );
+
+    } catch (Exception e) {
+      logger.error(
+        "Failed to send snapshot request",
+        e
+      );
+    }
+  }
+
+  private void handleSnapshotResponse(
+    String room,
+    byte[] data
+  ) {
+    if (
+      data.length <
+        1 + Long.BYTES
+    ) {
+      logger.warn(
+        "Invalid snapshot response received"
+      );
+
+      return;
+    }
+
+    long snapshotUpdateId =
+      java.nio.ByteBuffer
+        .wrap(
+          data,
+          1,
+          Long.BYTES
+        )
+        .getLong();
+
+    int snapshotStart =
+      1 + Long.BYTES;
+
+    byte[] snapshotData =
+      new byte[
+        data.length - snapshotStart
+        ];
+
+    System.arraycopy(
+      data,
+      snapshotStart,
+      snapshotData,
+      0,
+      snapshotData.length
+    );
+
+    if (snapshotData.length == 0) {
+      logger.warn(
+        "Received empty snapshot for room: {}",
+        room
+      );
+
+      return;
+    }
+
+    persistenceService.saveSnapshot(
+      room,
+      snapshotData,
+      snapshotUpdateId
+    );
+
+    roomManager.applySnapshot(
+      room,
+      snapshotData,
+      snapshotUpdateId
+    );
+
+    logger.info(
+      "Snapshot saved for room: {} at update ID: {}",
+      room,
+      snapshotUpdateId
+    );
+  }
+
+  private WebSocketSession getSnapshotSession(
+    String room
+  ) {
+    for (
+      WebSocketSession session :
+      roomManager.getRoomSessions(room)
+    ) {
+      if (session.isOpen()) {
+        return session;
+      }
+    }
+
+    return null;
+  }
 }
+
