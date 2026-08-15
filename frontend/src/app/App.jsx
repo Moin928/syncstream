@@ -21,7 +21,7 @@ function App() {
   )
 
   const [connectionState, setConnectionState] =
-  useState("CONNECTING")
+    useState("CONNECTING")
 
   const [joined, setJoined] = useState(false)
 
@@ -41,372 +41,372 @@ function App() {
     }
 
     const provider = new SpringWebSocketProvider(
-  room,
-  ydoc,
-  username,
-  setUsers,
+      room,
+      ydoc,
+      username,
+      setUsers,
 
-  // Remote cursor
-  (cursor) => {
-    if (
-      cursor.clientId ===
-      provider.clientId
-    ) {
-      return
-    }
-
-    const editor =
-      editorRef.current
-
-    if (!editor) {
-      return
-    }
-
-    const model =
-      editor.getModel()
-
-    if (!model) {
-      return
-    }
-
-    const lineNumber =
-      Math.max(
-        1,
-        Math.min(
-          cursor.lineNumber,
-          model.getLineCount()
-        )
-      )
-
-    const maxColumn =
-      model.getLineMaxColumn(
-        lineNumber
-      )
-
-    const column =
-      Math.max(
-        1,
-        Math.min(
-          cursor.column,
-          maxColumn
-        )
-      )
-
-    const oldDecoration =
-      remoteCursorsRef.current.get(
-        cursor.clientId
-      )
-
-    const decorations =
-      editor.deltaDecorations(
-        oldDecoration
-          ? [oldDecoration]
-          : [],
-        [
-          {
-            range: {
-              startLineNumber:
-                lineNumber,
-              startColumn:
-                column,
-              endLineNumber:
-                lineNumber,
-              endColumn:
-                column
-            },
-
-            options: {
-              beforeContentClassName:
-                "remote-cursor"
-            }
-          }
-        ]
-      )
-
-    remoteCursorsRef.current.set(
-      cursor.clientId,
-      decorations[0]
-    )
-
-    /*
-     * Remote username
-     */
-
-    let widget =
-      remoteCursorWidgetsRef.current.get(
-        cursor.clientId
-      )
-
-    if (!widget) {
-      widget = {
-        id:
-          `remote-cursor-${cursor.clientId}`,
-
-        position: {
-          lineNumber,
-          column
-        },
-
-        username:
-          cursor.username,
-
-        domNode: null,
-
-        getId() {
-          return this.id
-        },
-
-        getDomNode() {
-          if (!this.domNode) {
-            const node =
-              document.createElement(
-                "div"
-              )
-
-            node.className =
-              "remote-cursor-label"
-
-            node.textContent =
-              this.username
-
-            this.domNode =
-              node
-          }
-
-          return this.domNode
-        },
-
-        getPosition() {
-          return {
-            position:
-              this.position,
-
-            preference: [
-              1,
-              2
-            ]
-          }
+      // show where other people are typing
+      (cursor) => {
+        if (
+          cursor.clientId ===
+          provider.clientId
+        ) {
+          return
         }
-      }
 
-      remoteCursorWidgetsRef.current.set(
-        cursor.clientId,
-        widget
-      )
+        const editor =
+          editorRef.current
 
-      editor.addContentWidget(
-        widget
-      )
-    } else {
-      widget.position = {
-        lineNumber,
-        column
-      }
+        if (!editor) {
+          return
+        }
 
-      widget.username =
-        cursor.username
+        const model =
+          editor.getModel()
 
-      if (widget.domNode) {
-        widget.domNode.textContent =
-          cursor.username
-      }
+        if (!model) {
+          return
+        }
 
-      editor.layoutContentWidget(
-        widget
-      )
-    }
-  },
-
-  // Remote user leaves
-  (clientId) => {
-    const editor =
-      editorRef.current
-
-    if (!editor) {
-      return
-    }
-
-    /*
-     * Remove cursor
-     */
-
-    const decoration =
-      remoteCursorsRef.current.get(
-        clientId
-      )
-
-    if (decoration) {
-      editor.deltaDecorations(
-        [decoration],
-        []
-      )
-
-      remoteCursorsRef.current.delete(
-        clientId
-      )
-    }
-
-    /*
-     * Remove username
-     */
-
-    const widget =
-      remoteCursorWidgetsRef.current.get(
-        clientId
-      )
-
-    if (widget) {
-      editor.removeContentWidget(
-        widget
-      )
-
-      remoteCursorWidgetsRef.current.delete(
-        clientId
-      )
-    }
-
-    /*
-     * Remove selection
-     */
-
-    const selection =
-      remoteSelectionsRef.current.get(
-        clientId
-      )
-
-    if (selection) {
-      editor.deltaDecorations(
-        [selection],
-        []
-      )
-
-      remoteSelectionsRef.current.delete(
-        clientId
-      )
-    }
-  },
-
-  // Remote selection
-    // Remote selection
-  (selection) => {
-    if (
-      selection.clientId ===
-      provider.clientId
-    ) {
-      return
-    }
-
-    const editor =
-      editorRef.current
-
-    if (!editor) {
-      return
-    }
-
-    const model =
-      editor.getModel()
-
-    if (!model) {
-      return
-    }
-
-    const clientId =
-      selection.clientId
-
-    const remoteSelection =
-      selection.selection
-
-    const oldDecoration =
-      remoteSelectionsRef.current.get(
-        clientId
-      )
-
-    if (oldDecoration) {
-      editor.deltaDecorations(
-        [oldDecoration],
-        []
-      )
-
-      remoteSelectionsRef.current.delete(
-        clientId
-      )
-    }
-
-    if (!remoteSelection) {
-      return
-    }
-
-    const startLineNumber =
-      Math.max(
-        1,
-        Math.min(
-          remoteSelection.startLineNumber,
-          model.getLineCount()
-        )
-      )
-
-    const endLineNumber =
-      Math.max(
-        startLineNumber,
-        Math.min(
-          remoteSelection.endLineNumber,
-          model.getLineCount()
-        )
-      )
-
-    const startColumn =
-      Math.max(
-        1,
-        Math.min(
-          remoteSelection.startColumn,
-          model.getLineMaxColumn(
-            startLineNumber
+        const lineNumber =
+          Math.max(
+            1,
+            Math.min(
+              cursor.lineNumber,
+              model.getLineCount()
+            )
           )
-        )
-      )
 
-    const endColumn =
-      Math.max(
-        1,
-        Math.min(
-          remoteSelection.endColumn,
+        const maxColumn =
           model.getLineMaxColumn(
-            endLineNumber
+            lineNumber
           )
-        )
-      )
 
-    const decorations =
-      editor.deltaDecorations(
-        [],
-        [
-          {
-            range: {
-              startLineNumber,
-              startColumn,
-              endLineNumber,
-              endColumn
+        const column =
+          Math.max(
+            1,
+            Math.min(
+              cursor.column,
+              maxColumn
+            )
+          )
+
+        const oldDecoration =
+          remoteCursorsRef.current.get(
+            cursor.clientId
+          )
+
+        const decorations =
+          editor.deltaDecorations(
+            oldDecoration
+              ? [oldDecoration]
+              : [],
+            [
+              {
+                range: {
+                  startLineNumber:
+                    lineNumber,
+                  startColumn:
+                    column,
+                  endLineNumber:
+                    lineNumber,
+                  endColumn:
+                    column
+                },
+
+                options: {
+                  beforeContentClassName:
+                    "remote-cursor"
+                }
+              }
+            ]
+          )
+
+        remoteCursorsRef.current.set(
+          cursor.clientId,
+          decorations[0]
+        )
+
+        /*
+         * the username sits beside the cursor.
+         * otherwise we'd have tiny mysterious lines moving around the editor.
+         */
+
+        let widget =
+          remoteCursorWidgetsRef.current.get(
+            cursor.clientId
+          )
+
+        if (!widget) {
+          widget = {
+            id:
+              `remote-cursor-${cursor.clientId}`,
+
+            position: {
+              lineNumber,
+              column
             },
 
-            options: {
-              className:
-                "remote-selection"
+            username:
+              cursor.username,
+
+            domNode: null,
+
+            getId() {
+              return this.id
+            },
+
+            getDomNode() {
+              if (!this.domNode) {
+                const node =
+                  document.createElement(
+                    "div"
+                  )
+
+                node.className =
+                  "remote-cursor-label"
+
+                node.textContent =
+                  this.username
+
+                this.domNode =
+                  node
+              }
+
+              return this.domNode
+            },
+
+            getPosition() {
+              return {
+                position:
+                  this.position,
+
+                preference: [
+                  1,
+                  2
+                ]
+              }
             }
           }
-        ]
-      )
 
-    remoteSelectionsRef.current.set(
-      clientId,
-      decorations[0]
+          remoteCursorWidgetsRef.current.set(
+            cursor.clientId,
+            widget
+          )
+
+          editor.addContentWidget(
+            widget
+          )
+        } else {
+          widget.position = {
+            lineNumber,
+            column
+          }
+
+          widget.username =
+            cursor.username
+
+          if (widget.domNode) {
+            widget.domNode.textContent =
+              cursor.username
+          }
+
+          editor.layoutContentWidget(
+            widget
+          )
+        }
+      },
+
+      // remove another user's cursor and selection when they leave
+      (clientId) => {
+        const editor =
+          editorRef.current
+
+        if (!editor) {
+          return
+        }
+
+        /*
+         * remove cursor
+         */
+
+        const decoration =
+          remoteCursorsRef.current.get(
+            clientId
+          )
+
+        if (decoration) {
+          editor.deltaDecorations(
+            [decoration],
+            []
+          )
+
+          remoteCursorsRef.current.delete(
+            clientId
+          )
+        }
+
+        /*
+         * remove username
+         */
+
+        const widget =
+          remoteCursorWidgetsRef.current.get(
+            clientId
+          )
+
+        if (widget) {
+          editor.removeContentWidget(
+            widget
+          )
+
+          remoteCursorWidgetsRef.current.delete(
+            clientId
+          )
+        }
+
+        /*
+         * remove selection
+         */
+
+        const selection =
+          remoteSelectionsRef.current.get(
+            clientId
+          )
+
+        if (selection) {
+          editor.deltaDecorations(
+            [selection],
+            []
+          )
+
+          remoteSelectionsRef.current.delete(
+            clientId
+          )
+        }
+      },
+
+      // draw the other user's selected text
+      (selection) => {
+        if (
+          selection.clientId ===
+          provider.clientId
+        ) {
+          return
+        }
+
+        const editor =
+          editorRef.current
+
+        if (!editor) {
+          return
+        }
+
+        const model =
+          editor.getModel()
+
+        if (!model) {
+          return
+        }
+
+        const clientId =
+          selection.clientId
+
+        const remoteSelection =
+          selection.selection
+
+        const oldDecoration =
+          remoteSelectionsRef.current.get(
+            clientId
+          )
+
+        if (oldDecoration) {
+          editor.deltaDecorations(
+            [oldDecoration],
+            []
+          )
+
+          remoteSelectionsRef.current.delete(
+            clientId
+          )
+        }
+
+        if (!remoteSelection) {
+          return
+        }
+
+        const startLineNumber =
+          Math.max(
+            1,
+            Math.min(
+              remoteSelection.startLineNumber,
+              model.getLineCount()
+            )
+          )
+
+        const endLineNumber =
+          Math.max(
+            startLineNumber,
+            Math.min(
+              remoteSelection.endLineNumber,
+              model.getLineCount()
+            )
+          )
+
+        const startColumn =
+          Math.max(
+            1,
+            Math.min(
+              remoteSelection.startColumn,
+              model.getLineMaxColumn(
+                startLineNumber
+              )
+            )
+          )
+
+        const endColumn =
+          Math.max(
+            1,
+            Math.min(
+              remoteSelection.endColumn,
+              model.getLineMaxColumn(
+                endLineNumber
+              )
+            )
+          )
+
+        const decorations =
+          editor.deltaDecorations(
+            [],
+            [
+              {
+                range: {
+                  startLineNumber,
+                  startColumn,
+                  endLineNumber,
+                  endColumn
+                },
+
+                options: {
+                  className:
+                    "remote-selection"
+                }
+              }
+            ]
+          )
+
+        remoteSelectionsRef.current.set(
+          clientId,
+          decorations[0]
+        )
+      },
+
+      // keep the ui in sync with the websocket
+      (state) => {
+        setConnectionState(state)
+      }
     )
-  },
-
-  // Connection state
-  (state) => {
-    setConnectionState(state)
-  }
-)
 
     providerRef.current =
       provider
@@ -421,52 +421,51 @@ function App() {
         editorRef.current
 
       if (editor) {
-  /*
-   * Remove all remote cursors
-   */
+        /*
+         * clean up every remote cursor
+         */
 
-  const decorations = [
-    ...remoteCursorsRef.current.values()
-  ]
+        const decorations = [
+          ...remoteCursorsRef.current.values()
+        ]
 
-  editor.deltaDecorations(
-    decorations,
-    []
-  )
+        editor.deltaDecorations(
+          decorations,
+          []
+        )
 
-  /*
-   * Remove all remote username widgets
-   */
+        /*
+         * clean up the username labels
+         */
 
-  for (
-    const widget of
-    remoteCursorWidgetsRef.current.values()
-  ) {
-    editor.removeContentWidget(
-      widget
-    )
-  }
+        for (
+          const widget of
+          remoteCursorWidgetsRef.current.values()
+        ) {
+          editor.removeContentWidget(
+            widget
+          )
+        }
 
-  /*
-   * Remove all remote selections
-   */
+        /*
+         * clean up remote selections
+         */
 
-  const selectionDecorations = [
-    ...remoteSelectionsRef.current.values()
-  ]
+        const selectionDecorations = [
+          ...remoteSelectionsRef.current.values()
+        ]
 
-  editor.deltaDecorations(
-    selectionDecorations,
-    []
-  )
-}
+        editor.deltaDecorations(
+          selectionDecorations,
+          []
+        )
+      }
 
-remoteCursorsRef.current.clear()
+      remoteCursorsRef.current.clear()
 
-remoteCursorWidgetsRef.current.clear()
+      remoteCursorWidgetsRef.current.clear()
 
-remoteSelectionsRef.current.clear()
-
+      remoteSelectionsRef.current.clear()
     }
   }, [
     joined,
@@ -500,32 +499,32 @@ remoteSelectionsRef.current.clear()
     )
 
     editor.onDidChangeCursorSelection(
-  (event) => {
-    const selection =
-      event.selection
+      (event) => {
+        const selection =
+          event.selection
 
-    const hasSelection =
-      selection.startLineNumber !==
-        selection.endLineNumber ||
-      selection.startColumn !==
-        selection.endColumn
+        const hasSelection =
+          selection.startLineNumber !==
+            selection.endLineNumber ||
+          selection.startColumn !==
+            selection.endColumn
 
-    providerRef.current?.sendSelection(
-      hasSelection
-        ? {
-            startLineNumber:
-              selection.startLineNumber,
-            startColumn:
-              selection.startColumn,
-            endLineNumber:
-              selection.endLineNumber,
-            endColumn:
-              selection.endColumn
-          }
-        : null
+        providerRef.current?.sendSelection(
+          hasSelection
+            ? {
+                startLineNumber:
+                  selection.startLineNumber,
+                startColumn:
+                  selection.startColumn,
+                endLineNumber:
+                  selection.endLineNumber,
+                endColumn:
+                  selection.endColumn
+              }
+            : null
+        )
+      }
     )
-  }
-)
   }
 
   const handleJoin = (
@@ -589,8 +588,9 @@ remoteSelectionsRef.current.clear()
   return (
     <main className="h-screen w-full bg-gray-950 flex gap-4 p-4">
       <div className="absolute top-4 right-4 z-10 px-3 py-1 rounded bg-gray-800 text-white text-sm">
-  {connectionState}
-</div>
+        {connectionState}
+      </div>
+
       <aside className="h-full w-1/4 bg-amber-50 rounded-lg">
         <h2 className="text-2xl font-bold p-4 border-b border-gray-300">
           Users
