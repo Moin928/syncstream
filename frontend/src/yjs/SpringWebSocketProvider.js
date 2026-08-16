@@ -17,7 +17,8 @@ export class SpringWebSocketProvider {
     onCursorChange,
     onUserLeave,
     onSelectionChange,
-    onConnectionStateChange
+    onConnectionStateChange,
+    onSyncComplete
   ) {
     this.clientId = crypto.randomUUID()
 
@@ -29,8 +30,8 @@ export class SpringWebSocketProvider {
     this.onCursorChange = onCursorChange
     this.onUserLeave = onUserLeave
     this.onSelectionChange = onSelectionChange
-    this.onConnectionStateChange =
-      onConnectionStateChange
+    this.onConnectionStateChange = onConnectionStateChange
+    this.onSyncComplete = onSyncComplete
 
     this.users = []
 
@@ -405,49 +406,53 @@ export class SpringWebSocketProvider {
   }
 
   handleSyncComplete(
-    data
-  ) {
-    const targetClientId =
-      new TextDecoder().decode(
-        data.slice(1, 37)
-      )
-
-    if (
-      targetClientId !==
-      this.clientId
-    ) {
-      return
-    }
-
-    /*
-     * At this point the server finished sending room history.
-     * We send our current state back as the final sync update.
-     */
-    const update =
-      Y.encodeStateAsUpdate(
-        this.ydoc
-      )
-
-    const message =
-      new Uint8Array(
-        1 + update.length
-      )
-
-    message[0] = MESSAGE_UPDATE
-
-    message.set(
-      update,
-      1
+  data
+) {
+  const targetClientId =
+    new TextDecoder().decode(
+      data.slice(1, 37)
     )
 
-    if (
-      this.socket &&
-      this.socket.readyState ===
-        WebSocket.OPEN
-    ) {
-      this.socket.send(message)
-    }
+  if (
+    targetClientId !==
+    this.clientId
+  ) {
+    return
   }
+
+  /*
+   * At this point the server finished sending room history.
+   * We send our current state back as the final sync update.
+   */
+  const update =
+    Y.encodeStateAsUpdate(
+      this.ydoc
+    )
+
+  const message =
+    new Uint8Array(
+      1 + update.length
+    )
+
+  message[0] = MESSAGE_UPDATE
+
+  message.set(
+    update,
+    1
+  )
+
+  if (
+    this.socket &&
+    this.socket.readyState ===
+      WebSocket.OPEN
+  ) {
+    this.socket.send(message)
+  }
+
+  if (this.onSyncComplete) {
+    this.onSyncComplete()
+  }
+}
 
   handleSnapshotRequest(
     data
