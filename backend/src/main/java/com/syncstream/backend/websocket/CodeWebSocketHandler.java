@@ -180,6 +180,7 @@ public class CodeWebSocketHandler
     WebSocketSession sender,
     byte[] data
   ) {
+    // stores the update before sending it to the other clients
     roomManager.addRoomUpdate(
       room,
       data
@@ -191,6 +192,7 @@ public class CodeWebSocketHandler
       data
     );
 
+    // asks a client for a snapshot once enough updates have built up
     if (
       roomManager.shouldCompact(room)
     ) {
@@ -228,7 +230,8 @@ public class CodeWebSocketHandler
       );
 
     /*
-     * only the requesting client should receive the sync.
+     * only the client that requested the sync should
+     * receive the stored room state.
      */
     String requesterClientId =
       (String) requester
@@ -253,7 +256,8 @@ public class CodeWebSocketHandler
       );
 
     /*
-     * replay the stored room state.
+     * replays the stored room state so the client can
+     * rebuild the current document.
      */
     for (byte[] update : updates) {
       try {
@@ -613,6 +617,7 @@ public class CodeWebSocketHandler
   private byte[] createPresenceMessage(
     Map<String, ?> presence
   ) throws Exception {
+    // converts the presence data into the binary message format
     byte[] jsonBytes =
       objectMapper
         .writeValueAsString(
@@ -736,6 +741,7 @@ public class CodeWebSocketHandler
       return;
     }
 
+    // saves the snapshot first so the persisted state is updated
     persistenceService.saveSnapshot(
       room,
       snapshotData,
@@ -758,6 +764,7 @@ public class CodeWebSocketHandler
   private WebSocketSession getSnapshotSession(
     String room
   ) {
+    // uses the first active client in the room to create the snapshot
     for (
       WebSocketSession session :
       roomManager.getRoomSessions(room)
@@ -770,4 +777,3 @@ public class CodeWebSocketHandler
     return null;
   }
 }
-

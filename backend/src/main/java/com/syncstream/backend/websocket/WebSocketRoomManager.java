@@ -25,8 +25,8 @@ public class WebSocketRoomManager {
   private final RoomPersistenceService persistenceService;
 
   /*
-   * Represents one persisted Yjs update currently
-   * held in server memory like she was in my memory sed.
+   * represents one persisted Yjs update currently
+   * kept in server memory for quick access.
    */
   private record RoomUpdateState(
     long id,
@@ -34,9 +34,9 @@ public class WebSocketRoomManager {
   ) {}
 
   /*
-   * Represents the complete in-memory state of a room.
+   * represents the complete in-memory state of a room.
    *
-   * The snapshot is kept separately from normal
+   * the snapshot is kept seperately from normal
    * updates because it represents a compacted state.
    */
   private static class RoomState {
@@ -76,6 +76,7 @@ public class WebSocketRoomManager {
         return existing;
       }
 
+      // loads the persisted state when a room enters server memory
       RoomPersistenceService.RecoveryState recovery =
         persistenceService.loadRecoveryState(room);
 
@@ -115,8 +116,10 @@ public class WebSocketRoomManager {
     String room,
     WebSocketSession session
   ) {
+    // loads the room before adding the first active session
     loadRoomState(room);
 
+    // protects sends from being blocked by a slow websocket client
     WebSocketSession decoratedSession =
       new ConcurrentWebSocketSessionDecorator(
         session,
@@ -239,7 +242,7 @@ public class WebSocketRoomManager {
   }
 
   /*
-   * Store a Yjs update.
+   * stores a Yjs update in both the database and memory.
    */
   public long addRoomUpdate(
     String room,
@@ -249,8 +252,8 @@ public class WebSocketRoomManager {
       loadRoomState(room);
 
     /*
-     * Persist first because the database generates
-     * the update ID.
+     * persists first because the database generates
+     * the update id for us.
      */
     long updateId =
       persistenceService.saveUpdate(
@@ -271,10 +274,10 @@ public class WebSocketRoomManager {
   }
 
   /*
-   * return the current room state as Yjs updates.
+   * returns the current room state as Yjs updates.
    *
-   * snapshot comes first like god, followed by updates that
-   * occurred after that snapshot.
+   * the snapshot comes first, followed by updates that
+   * happened after that snapshot was created.
    */
   public List<byte[]> getRoomUpdates(
     String room
@@ -324,7 +327,7 @@ public class WebSocketRoomManager {
   }
 
   /*
-   * determine whether enough updates have accumulated
+   * checks whether enough updates have accumulated
    * since the current snapshot.
    */
   public boolean shouldCompact(
@@ -340,8 +343,8 @@ public class WebSocketRoomManager {
   }
 
   /*
-   * replace the current in-memory snapshot and remove
-   * all updates already covered by that snapshot.
+   * replaces the current in-memory snapshot and removes
+   * updates that are already covered by that snapshot.
    */
   public void applySnapshot(
     String room,

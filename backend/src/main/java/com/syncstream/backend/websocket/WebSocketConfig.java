@@ -13,7 +13,9 @@ public class WebSocketConfig implements WebSocketConfigurer {
 
   private final CodeWebSocketHandler codeWebSocketHandler;
 
-  public WebSocketConfig(CodeWebSocketHandler codeWebSocketHandler) {
+  public WebSocketConfig(
+    CodeWebSocketHandler codeWebSocketHandler
+  ) {
     this.codeWebSocketHandler = codeWebSocketHandler;
   }
 
@@ -21,9 +23,15 @@ public class WebSocketConfig implements WebSocketConfigurer {
   public void registerWebSocketHandlers(
     WebSocketHandlerRegistry registry
   ) {
+    // registers the websocket endpoint and the interceptor used for room details
     registry
-      .addHandler(codeWebSocketHandler, "/ws")
-      .addInterceptors(new RoomHandshakeInterceptor())
+      .addHandler(
+        codeWebSocketHandler,
+        "/ws"
+      )
+      .addInterceptors(
+        new RoomHandshakeInterceptor()
+      )
       .setAllowedOrigins("*");
   }
 
@@ -33,12 +41,14 @@ public class WebSocketConfig implements WebSocketConfigurer {
     ServletServerContainerFactoryBean container =
       new ServletServerContainerFactoryBean();
 
+    // increases the binary message buffer size to 5 mb
     container.setMaxBinaryMessageBufferSize(
-      1024 * 1024
+      5 * 1024 * 1024
     );
 
+    // increases the text message buffer size to 5 mb
     container.setMaxTextMessageBufferSize(
-      1024 * 1024
+      5 * 1024 * 1024
     );
 
     return container;
