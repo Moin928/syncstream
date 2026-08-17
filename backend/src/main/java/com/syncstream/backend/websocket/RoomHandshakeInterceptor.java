@@ -16,6 +16,7 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
     WebSocketHandler wsHandler,
     Map<String, Object> attributes
   ) {
+    // gets the query parameters from the websocket connection request
     String query = request.getURI().getQuery();
 
     if (query == null) {
@@ -25,6 +26,7 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
     String room = null;
     String clientId = null;
 
+    // reads the room and client id from the connection parameters
     for (String parameter : query.split("&")) {
       String[] parts = parameter.split("=", 2);
 
@@ -49,6 +51,7 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
       return false;
     }
 
+    // stores the connection details so the websocket handler can use them later
     attributes.put("room", room);
     attributes.put("clientId", clientId);
 
