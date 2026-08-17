@@ -8,6 +8,7 @@ public class HealthController {
 
   @GetMapping("/health")
   public String health() {
+    // simple endpoint used to check if the backend is running
     return "OK";
   }
 }

@@ -24,6 +24,7 @@ public class RoomController {
   @PostMapping
   public ResponseEntity<String> createRoom() {
 
+    // generates a unique id for the new room
     String roomId =
       UUID.randomUUID().toString();
 
@@ -32,6 +33,7 @@ public class RoomController {
 
     roomRepository.save(room);
 
+    // returns the room id after it has been created
     return ResponseEntity
       .status(HttpStatus.CREATED)
       .body(roomId);
@@ -42,6 +44,7 @@ public class RoomController {
     @PathVariable String roomId
   ) {
 
+    // checks whether the requested room exists in the database
     if (!roomRepository.existsById(roomId)) {
       return ResponseEntity
         .notFound()
