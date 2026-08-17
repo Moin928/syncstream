@@ -44,6 +44,7 @@ public class RoomUpdate {
   }
 
   public byte[] getUpdateData() {
+    // returns a copy so the stored update cannot be modified directly
     return updateData.clone();
   }
 }

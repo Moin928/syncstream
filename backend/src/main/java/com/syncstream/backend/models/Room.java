@@ -29,6 +29,7 @@ public class Room {
   }
 
   public void updateTimestamp() {
+    // updates the timestamp whenever something changes in the room
     this.updatedAt = Instant.now();
   }
 }

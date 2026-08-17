@@ -51,12 +51,14 @@ public class RoomDocument {
     byte[] snapshotData,
     long snapshotUpdateId
   ) {
+    // replaces the old snapshot with the latest document state
     this.snapshotData = snapshotData.clone();
     this.snapshotUpdateId = snapshotUpdateId;
     this.updatedAt = Instant.now();
   }
 
   public byte[] getSnapshotData() {
+    // returns a copy so the stored snapshot cannot be changed directly
     return snapshotData.clone();
   }
 }
