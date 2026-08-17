@@ -37,6 +37,7 @@ public class RoomPersistenceService {
 
   @Transactional
   public Room getOrCreateRoom(String roomId) {
+    // creates the room only when it does not already exist
     return roomRepository
       .findById(roomId)
       .orElseGet(() ->
@@ -51,6 +52,7 @@ public class RoomPersistenceService {
     String roomId,
     byte[] update
   ) {
+    // stores each update so it can be used later for recovery
     Room room =
       getOrCreateRoom(roomId);
 
@@ -74,6 +76,7 @@ public class RoomPersistenceService {
     byte[] snapshotData,
     long snapshotUpdateId
   ) {
+    // saves the latest document snapshot and removes older updates
     Room room =
       getOrCreateRoom(roomId);
 
@@ -109,6 +112,7 @@ public class RoomPersistenceService {
   public long getLatestUpdateId(
     String roomId
   ) {
+    // gets the latest update id without changing anything in the database
     return roomUpdateRepository
       .findTopByRoomIdOrderByIdDesc(roomId)
       .map(RoomUpdate::getId)
@@ -119,10 +123,12 @@ public class RoomPersistenceService {
   public RecoveryState loadRecoveryState(
     String roomId
   ) {
+    // loads the snapshot and any updates that came after it
     Optional<RoomDocument> snapshot =
       roomDocumentRepository.findById(roomId);
 
     if (snapshot.isEmpty()) {
+      // if there is no snapshot, all stored updates are needed for recovery
       return new RecoveryState(
         null,
         0L,
