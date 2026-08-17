@@ -42,11 +42,10 @@ export class SpringWebSocketProvider {
     this.reconnectAttempt = 0
 
     /*
-     * Every local Yjs change comes here.
+     * handles every local Yjs change.
      *
-     * If the change came from us while applying a remote update
-     * we do not send it back or the server would get the same thing twice.
-     * Which would be a pretty dumb way to create an infinite loop.
+     * changes applied from this provider are ignored so they
+     * are not sent back to the server again.
      */
     this.handleUpdate = (
       update,
@@ -81,9 +80,7 @@ export class SpringWebSocketProvider {
       this.handleUpdate
     )
 
-    /*
-     * Here we go again, talking to the server.
-     */
+    // starts the websocket connection for this room
     this.connect()
   }
 
@@ -95,8 +92,8 @@ export class SpringWebSocketProvider {
     }
 
     /*
-     * Don't open another socket if the current one is
-     * already doing its job.
+     * avoids creating another socket when the current one is
+     * already connecting or connected.
      */
     if (
       this.socket &&
@@ -139,9 +136,7 @@ export class SpringWebSocketProvider {
         `Connected to room: ${this.room}`
       )
 
-      /*
-       * Socket works so the reconnect suffering can stop now.
-       */
+      // resets the reconnect counter after a successful connection
       this.reconnectAttempt = 0
 
       this.setConnectionState(
@@ -187,8 +182,8 @@ export class SpringWebSocketProvider {
       }
 
       /*
-       * No need for a dramatic speech here.
-       * The reconnect code below will try again.
+       * intentional disconnects should not start the reconnect
+       * process again.
        */
       if (
         this.intentionalDisconnect
@@ -224,7 +219,8 @@ export class SpringWebSocketProvider {
     }
 
     /*
-     * Tell the server who is asking for the room history.
+     * tells the server which client should receive the
+     * stored room history.
      */
     const request =
       new Uint8Array(37)
@@ -323,9 +319,8 @@ export class SpringWebSocketProvider {
     }
 
     /*
-     * Unknown message?
-     * Either the protocol changed or someone sent garbage.
-     * Humans do love both.
+     * ignores unknown message types because they are not
+     * part of the current websocket protocol.
      */
   }
 
@@ -338,9 +333,8 @@ export class SpringWebSocketProvider {
       )
 
     /*
-     * Send our current state back.
-     * Yjs does the heavy lifting because apparently we were
-     * not suffering enough already.
+     * encodes the current Yjs state so it can be sent to
+     * the client that requested the sync.
      */
     const update =
       Y.encodeStateAsUpdate(
@@ -398,6 +392,7 @@ export class SpringWebSocketProvider {
     const update =
       data.slice(37)
 
+    // applies the state received from the server to the local Yjs document
     Y.applyUpdate(
       this.ydoc,
       update,
@@ -406,60 +401,60 @@ export class SpringWebSocketProvider {
   }
 
   handleSyncComplete(
-  data
-) {
-  const targetClientId =
-    new TextDecoder().decode(
-      data.slice(1, 37)
-    )
-
-  if (
-    targetClientId !==
-    this.clientId
+    data
   ) {
-    return
-  }
+    const targetClientId =
+      new TextDecoder().decode(
+        data.slice(1, 37)
+      )
 
-  /*
-   * At this point the server finished sending room history.
-   * We send our current state back as the final sync update.
-   */
-  const update =
-    Y.encodeStateAsUpdate(
-      this.ydoc
+    if (
+      targetClientId !==
+      this.clientId
+    ) {
+      return
+    }
+
+    /*
+     * the server finished sending the stored room history,
+     * so the client sends its current state back as a final update.
+     */
+    const update =
+      Y.encodeStateAsUpdate(
+        this.ydoc
+      )
+
+    const message =
+      new Uint8Array(
+        1 + update.length
+      )
+
+    message[0] = MESSAGE_UPDATE
+
+    message.set(
+      update,
+      1
     )
 
-  const message =
-    new Uint8Array(
-      1 + update.length
-    )
+    if (
+      this.socket &&
+      this.socket.readyState ===
+        WebSocket.OPEN
+    ) {
+      this.socket.send(message)
+    }
 
-  message[0] = MESSAGE_UPDATE
-
-  message.set(
-    update,
-    1
-  )
-
-  if (
-    this.socket &&
-    this.socket.readyState ===
-      WebSocket.OPEN
-  ) {
-    this.socket.send(message)
+    if (this.onSyncComplete) {
+      this.onSyncComplete()
+    }
   }
-
-  if (this.onSyncComplete) {
-    this.onSyncComplete()
-  }
-}
 
   handleSnapshotRequest(
     data
   ) {
     /*
-     * The server gives us the update ID that marks
-     * the point represented by this snapshot.
+     * the server provides the update id that acts as the
+     * barrier for this snapshot.
      */
     const snapshotUpdateId =
       data.slice(1, 9)
@@ -692,9 +687,8 @@ export class SpringWebSocketProvider {
     }
 
     /*
-     * Start small, then back off.
-     * The server is probably not going to fix itself faster
-     * just because we yell at it every 10 ms.
+     * increases the delay after each failed connection so the
+     * client does not keep hitting the server immediately.
      */
     const delay =
       Math.min(
@@ -731,9 +725,8 @@ export class SpringWebSocketProvider {
 
   disconnect() {
     /*
-     * This is an intentional shutdown.
-     * We don't want the reconnect code waking up later like it forgot
-     * why we killed the socket in the first place.
+     * marks the disconnect as intentional so the reconnect
+     * logic does not start another connection afterward.
      */
     this.intentionalDisconnect =
       true
