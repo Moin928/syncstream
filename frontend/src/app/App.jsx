@@ -13,7 +13,9 @@ function App() {
   const remoteCursorWidgetsRef = useRef(new Map())
   const remoteSelectionsRef = useRef(new Map())
 
-  const [username, setUsername] = useState("")
+  const [username, setUsername] = useState(() => {
+    return new URLSearchParams(window.location.search).get("username") || ""
+  })
   const [users, setUsers] = useState([])
 
   const [room, setRoom] = useState(
@@ -26,7 +28,14 @@ function App() {
 
   const [language, setLanguage] = useState("javascript")
 
-  const [joined, setJoined] = useState(false)
+  const [joined, setJoined] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+
+    return Boolean(
+      params.get("room") &&
+      params.get("username")
+    )
+  })
   const [shareMessage, setShareMessage] = useState("")
 
   const [joinError, setJoinError] = useState("")
@@ -615,168 +624,180 @@ function App() {
   }
 
   const handleJoin = async (event) => {
-    event.preventDefault()
+  event.preventDefault()
+
+  setJoinError("")
+  setJoinLoading(true)
+
+  const form = event.currentTarget
+
+  const name =
+    form.elements.username.value.trim()
+
+  const roomInput =
+    form.elements.room?.value.trim()
+
+  const roomId =
+    roomInput || room.trim()
+
+  if (!name) {
+    setJoinError(
+      "Please enter a username."
+    )
+
+    setJoinLoading(false)
+    return
+  }
+
+  if (!roomId) {
+    setJoinError(
+      "Please enter a room ID."
+    )
+
+    setJoinLoading(false)
+    return
+  }
+
+  try {
+    // Check that the room exists before opening the WebSocket connection.
+    const response =
+      await fetch(
+        `http://localhost:8080/api/rooms/${encodeURIComponent(roomId)}`,
+        {
+          method: "GET",
+          headers: {
+            Accept:
+              "application/json, text/plain, */*"
+          }
+        }
+      )
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        setJoinError(
+          "Room not found. Check the room ID and try again."
+        )
+      } else {
+        setJoinError(
+          "Unable to join the room. Please try again."
+        )
+      }
+
+      return
+    }
 
     setJoinError("")
-    setJoinLoading(true)
 
-    const form =
-      event.currentTarget
+    setUsername(name)
+    setRoom(roomId)
+    setDocumentReady(false)
+    setJoined(true)
 
-    const name =
-      form.elements.username.value.trim()
-
-    const roomInput =
-      form.elements.room?.value.trim()
-
-    const roomId =
-      roomInput || room.trim()
-
-    if (!name) {
-      setJoinError(
-        "Please enter a username."
+    const params =
+      new URLSearchParams(
+        window.location.search
       )
 
-      setJoinLoading(false)
-      return
-    }
+    params.set("room", roomId)
+    params.set("username", name)
 
-    if (!roomId) {
-      setJoinError(
-        "Please enter a room ID."
-      )
+    window.history.pushState(
+      {},
+      "",
+      `?${params.toString()}`
+    )
+  } catch (error) {
+    console.error(
+      "Failed to join room",
+      error
+    )
 
-      setJoinLoading(false)
-      return
-    }
-
-    try {
-      // checks the room before opening the websocket connection
-      const response =
-        await fetch(
-          `http://localhost:8080/api/rooms/${encodeURIComponent(roomId)}`,
-          {
-            method: "GET",
-            headers: {
-              Accept:
-                "application/json, text/plain, */*"
-            }
-          }
-        )
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          setJoinError(
-            "Room not found. Check the room ID and try again."
-          )
-        } else {
-          setJoinError(
-            "Unable to join the room. Please try again."
-          )
-        }
-
-        return
-      }
-
-      setJoinError("")
-
-      setUsername(name)
-      setRoom(roomId)
-      setDocumentReady(false)
-      setJoined(true)
-
-      window.history.pushState(
-        {},
-        "",
-        `?room=${encodeURIComponent(roomId)}`
-      )
-    } catch (error) {
-      console.error(
-        "Failed to join room",
-        error
-      )
-
-      setJoinError(
-        "Unable to connect to the server. Please try again."
-      )
-    } finally {
-      setJoinLoading(false)
-    }
+    setJoinError(
+      "Unable to connect to the server. Please try again."
+    )
+  } finally {
+    setJoinLoading(false)
   }
+}
 
   const handleCreateRoom = async (event) => {
-    event.preventDefault()
+  event.preventDefault()
+
+  setCreateError("")
+  setCreateLoading(true)
+
+  const form = event.currentTarget
+
+  const name =
+    form.elements.username.value.trim()
+
+  if (!name) {
+    setCreateError(
+      "Please enter a username."
+    )
+
+    setCreateLoading(false)
+    return
+  }
+
+  try {
+    // Create a new room through the backend API.
+    const response =
+      await fetch(
+        "http://localhost:8080/api/rooms",
+        {
+          method: "POST"
+        }
+      )
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to create room: ${response.status}`
+      )
+    }
+
+    const roomId =
+      await response.text()
+
+    if (!roomId.trim()) {
+      throw new Error(
+        "Server returned an empty room ID"
+      )
+    }
 
     setCreateError("")
-    setCreateLoading(true)
 
-    const form =
-      event.currentTarget
+    setUsername(name)
+    setRoom(roomId.trim())
+    setDocumentReady(false)
+    setJoined(true)
 
-    const name =
-      form.elements.username.value.trim()
-
-    if (!name) {
-      setCreateError(
-        "Please enter a username."
+    const params =
+      new URLSearchParams(
+        window.location.search
       )
 
-      setCreateLoading(false)
-      return
-    }
+    params.set("room", roomId.trim())
+    params.set("username", name)
 
-    try {
-      // creates a new room through the backend api
-      const response =
-        await fetch(
-          "http://localhost:8080/api/rooms",
-          {
-            method: "POST"
-          }
-        )
+    window.history.pushState(
+      {},
+      "",
+      `?${params.toString()}`
+    )
+  } catch (error) {
+    console.error(
+      "Failed to create room",
+      error
+    )
 
-      if (!response.ok) {
-        throw new Error(
-          `Failed to create room: ${response.status}`
-        )
-      }
-
-      const roomId =
-        await response.text()
-
-      if (!roomId.trim()) {
-        throw new Error(
-          "Server returned an empty room ID"
-        )
-      }
-
-      setCreateError("")
-
-      setUsername(name)
-      setRoom(roomId.trim())
-      setDocumentReady(false)
-      setJoined(true)
-
-      window.history.pushState(
-        {},
-        "",
-        `?room=${encodeURIComponent(
-          roomId.trim()
-        )}`
-      )
-    } catch (error) {
-      console.error(
-        "Failed to create room",
-        error
-      )
-
-      setCreateError(
-        "Unable to create room. Please try again."
-      )
-    } finally {
-      setCreateLoading(false)
-    }
+    setCreateError(
+      "Unable to create room. Please try again."
+    )
+  } finally {
+    setCreateLoading(false)
   }
+}
 
   const handleShareRoom = async () => {
     try {
