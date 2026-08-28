@@ -12,22 +12,39 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
 public class WebSocketConfig implements WebSocketConfigurer {
 
   private final CodeWebSocketHandler codeWebSocketHandler;
+  private final TerminalWebSocketHandler terminalWebSocketHandler;
 
   public WebSocketConfig(
-    CodeWebSocketHandler codeWebSocketHandler
+    CodeWebSocketHandler codeWebSocketHandler,
+    TerminalWebSocketHandler terminalWebSocketHandler
   ) {
-    this.codeWebSocketHandler = codeWebSocketHandler;
+    this.codeWebSocketHandler =
+      codeWebSocketHandler;
+
+    this.terminalWebSocketHandler =
+      terminalWebSocketHandler;
   }
 
   @Override
   public void registerWebSocketHandlers(
     WebSocketHandlerRegistry registry
   ) {
-    // registers the websocket endpoint and the interceptor used for room details
+    // WebSocket used for collaborative code editing.
     registry
       .addHandler(
         codeWebSocketHandler,
         "/ws"
+      )
+      .addInterceptors(
+        new RoomHandshakeInterceptor()
+      )
+      .setAllowedOrigins("*");
+
+    // Separate WebSocket used by the terminal.
+    registry
+      .addHandler(
+        terminalWebSocketHandler,
+        "/terminal/ws"
       )
       .addInterceptors(
         new RoomHandshakeInterceptor()
@@ -41,12 +58,12 @@ public class WebSocketConfig implements WebSocketConfigurer {
     ServletServerContainerFactoryBean container =
       new ServletServerContainerFactoryBean();
 
-    // increases the binary message buffer size to 5 mb
+    // increases the binary message buffer size to 5 MB
     container.setMaxBinaryMessageBufferSize(
       5 * 1024 * 1024
     );
 
-    // increases the text message buffer size to 5 mb
+    // increases the text message buffer size to 5 MB
     container.setMaxTextMessageBufferSize(
       5 * 1024 * 1024
     );
