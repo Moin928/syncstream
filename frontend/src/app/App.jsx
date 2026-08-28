@@ -1,5 +1,8 @@
 import "./App.css"
+import "@xterm/xterm/css/xterm.css"
+
 import { Editor } from "@monaco-editor/react"
+import { Terminal } from "@xterm/xterm"
 import { MonacoBinding } from "y-monaco"
 import { useRef, useMemo, useState, useEffect } from "react"
 import * as Y from "yjs"
@@ -8,7 +11,10 @@ import { SpringWebSocketProvider } from "../yjs/SpringWebSocketProvider"
 function App() {
   const editorRef = useRef(null)
   const providerRef = useRef(null)
+  const terminalRef = useRef(null)
+  const terminalContainerRef = useRef(null)
   const connectionTimeoutRef = useRef(null)
+
   const remoteCursorsRef = useRef(new Map())
   const remoteCursorWidgetsRef = useRef(new Map())
   const remoteSelectionsRef = useRef(new Map())
@@ -16,6 +22,7 @@ function App() {
   const [username, setUsername] = useState(() => {
     return new URLSearchParams(window.location.search).get("username") || ""
   })
+
   const [users, setUsers] = useState([])
 
   const [room, setRoom] = useState(
@@ -27,6 +34,7 @@ function App() {
   const [documentReady, setDocumentReady] = useState(false)
 
   const [language, setLanguage] = useState("javascript")
+  const [terminalOpen, setTerminalOpen] = useState(false)
 
   const [joined, setJoined] = useState(() => {
     const params = new URLSearchParams(window.location.search)
@@ -36,27 +44,24 @@ function App() {
       params.get("username")
     )
   })
-  const [shareMessage, setShareMessage] = useState("")
 
+  const [shareMessage, setShareMessage] = useState("")
   const [joinError, setJoinError] = useState("")
   const [createError, setCreateError] = useState("")
 
   const [createLoading, setCreateLoading] = useState(false)
   const [joinLoading, setJoinLoading] = useState(false)
 
-  // creates the shared Yjs document used by the editor
   const ydoc = useMemo(
     () => new Y.Doc(),
     []
   )
 
-  // stores shared room metadata such as the selected language
   const ymetadata = useMemo(
     () => ydoc.getMap("metadata"),
     [ydoc]
   )
 
-  // stores the actual code shared between all connected users
   const yText = useMemo(
     () => ydoc.getText("monaco"),
     [ydoc]
@@ -67,7 +72,6 @@ function App() {
       return
     }
 
-    // creates the websocket provider once the user joins a room
     const provider = new SpringWebSocketProvider(
       room,
       ydoc,
@@ -96,7 +100,6 @@ function App() {
           return
         }
 
-        // keeps remote cursor positions inside the current editor bounds
         const lineNumber =
           Math.max(
             1,
@@ -162,7 +165,6 @@ function App() {
           )
 
         if (!widget) {
-          // creates a small label that shows who owns the remote cursor
           widget = {
             id:
               `remote-cursor-${cursor.clientId}`,
@@ -250,7 +252,6 @@ function App() {
           return
         }
 
-        // removes the cursor decoration when a user leaves
         const decoration =
           remoteCursorsRef.current.get(
             clientId
@@ -347,7 +348,6 @@ function App() {
           return
         }
 
-        // makes sure the remote selection stays inside the current document
         const startLineNumber =
           Math.max(
             1,
@@ -427,7 +427,6 @@ function App() {
       provider
 
     return () => {
-      // disconnects the provider and clears remote editor state
       provider.disconnect()
 
       providerRef.current =
@@ -477,7 +476,6 @@ function App() {
   ])
 
   useEffect(() => {
-    // reads the shared language whenever another user changes it
     const handleLanguageChange = () => {
       const sharedLanguage =
         ymetadata.get("language")
@@ -528,10 +526,10 @@ function App() {
 
     setConnectionTimedOut(false)
 
-    // gives the websocket connection a limited amount of time before showing an error
     connectionTimeoutRef.current =
       setTimeout(() => {
         setConnectionTimedOut(true)
+
         connectionTimeoutRef.current =
           null
       }, 15000)
@@ -568,11 +566,80 @@ function App() {
     }
   }, [connectionState])
 
+  useEffect(() => {
+    if (!terminalOpen) {
+      return
+    }
+
+    if (!terminalContainerRef.current) {
+      return
+    }
+
+    if (terminalRef.current) {
+      terminalRef.current.open(
+        terminalContainerRef.current
+      )
+
+      terminalRef.current.focus()
+
+      return
+    }
+
+    const terminal =
+      new Terminal({
+        cursorBlink: true,
+        fontSize: 14,
+        convertEol: true,
+        theme: {
+          background: "#171717",
+          foreground: "#d4d4d4"
+        }
+      })
+
+    terminal.open(
+      terminalContainerRef.current
+    )
+
+    terminal.write(
+      "SyncStream Terminal"
+    )
+
+    terminal.write(
+      "\r\nPhase 1 terminal ready."
+    )
+
+    terminal.write(
+      "\r\nCommand execution is not available yet."
+    )
+
+    terminal.write(
+      "\r\n\r\n$ "
+    )
+
+    terminalRef.current =
+      terminal
+
+    return () => {
+      if (terminalRef.current) {
+        terminalRef.current.dispose()
+        terminalRef.current = null
+      }
+    }
+  }, [terminalOpen])
+
+  useEffect(() => {
+    if (
+      terminalOpen &&
+      terminalRef.current
+    ) {
+      terminalRef.current.focus()
+    }
+  }, [terminalOpen])
+
   const handleMount = (editor) => {
     editorRef.current =
       editor
 
-    // connects Monaco's text model to the shared Yjs document
     new MonacoBinding(
       yText,
       editor.getModel(),
@@ -624,184 +691,197 @@ function App() {
   }
 
   const handleJoin = async (event) => {
-  event.preventDefault()
+    event.preventDefault()
 
-  setJoinError("")
-  setJoinLoading(true)
+    setJoinError("")
+    setJoinLoading(true)
 
-  const form = event.currentTarget
+    const form =
+      event.currentTarget
 
-  const name =
-    form.elements.username.value.trim()
+    const name =
+      form.elements.username.value.trim()
 
-  const roomInput =
-    form.elements.room?.value.trim()
+    const roomInput =
+      form.elements.room?.value.trim()
 
-  const roomId =
-    roomInput || room.trim()
+    const roomId =
+      roomInput || room.trim()
 
-  if (!name) {
-    setJoinError(
-      "Please enter a username."
-    )
-
-    setJoinLoading(false)
-    return
-  }
-
-  if (!roomId) {
-    setJoinError(
-      "Please enter a room ID."
-    )
-
-    setJoinLoading(false)
-    return
-  }
-
-  try {
-    // Check that the room exists before opening the WebSocket connection.
-    const response =
-      await fetch(
-        `http://localhost:8080/api/rooms/${encodeURIComponent(roomId)}`,
-        {
-          method: "GET",
-          headers: {
-            Accept:
-              "application/json, text/plain, */*"
-          }
-        }
+    if (!name) {
+      setJoinError(
+        "Please enter a username."
       )
 
-    if (!response.ok) {
-      if (response.status === 404) {
-        setJoinError(
-          "Room not found. Check the room ID and try again."
-        )
-      } else {
-        setJoinError(
-          "Unable to join the room. Please try again."
-        )
-      }
-
+      setJoinLoading(false)
       return
     }
 
-    setJoinError("")
-
-    setUsername(name)
-    setRoom(roomId)
-    setDocumentReady(false)
-    setJoined(true)
-
-    const params =
-      new URLSearchParams(
-        window.location.search
+    if (!roomId) {
+      setJoinError(
+        "Please enter a room ID."
       )
 
-    params.set("room", roomId)
-    params.set("username", name)
+      setJoinLoading(false)
+      return
+    }
 
-    window.history.pushState(
-      {},
-      "",
-      `?${params.toString()}`
-    )
-  } catch (error) {
-    console.error(
-      "Failed to join room",
-      error
-    )
+    try {
+      const response =
+        await fetch(
+          `http://localhost:8080/api/rooms/${encodeURIComponent(roomId)}`,
+          {
+            method: "GET",
+            headers: {
+              Accept:
+                "application/json, text/plain, */*"
+            }
+          }
+        )
 
-    setJoinError(
-      "Unable to connect to the server. Please try again."
-    )
-  } finally {
-    setJoinLoading(false)
+      if (!response.ok) {
+        if (response.status === 404) {
+          setJoinError(
+            "Room not found. Check the room ID and try again."
+          )
+        } else {
+          setJoinError(
+            "Unable to join the room. Please try again."
+          )
+        }
+
+        return
+      }
+
+      setJoinError("")
+
+      setUsername(name)
+      setRoom(roomId)
+      setDocumentReady(false)
+      setJoined(true)
+
+      const params =
+        new URLSearchParams(
+          window.location.search
+        )
+
+      params.set(
+        "room",
+        roomId
+      )
+
+      params.set(
+        "username",
+        name
+      )
+
+      window.history.pushState(
+        {},
+        "",
+        `?${params.toString()}`
+      )
+    } catch (error) {
+      console.error(
+        "Failed to join room",
+        error
+      )
+
+      setJoinError(
+        "Unable to connect to the server. Please try again."
+      )
+    } finally {
+      setJoinLoading(false)
+    }
   }
-}
 
   const handleCreateRoom = async (event) => {
-  event.preventDefault()
-
-  setCreateError("")
-  setCreateLoading(true)
-
-  const form = event.currentTarget
-
-  const name =
-    form.elements.username.value.trim()
-
-  if (!name) {
-    setCreateError(
-      "Please enter a username."
-    )
-
-    setCreateLoading(false)
-    return
-  }
-
-  try {
-    // Create a new room through the backend API.
-    const response =
-      await fetch(
-        "http://localhost:8080/api/rooms",
-        {
-          method: "POST"
-        }
-      )
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to create room: ${response.status}`
-      )
-    }
-
-    const roomId =
-      await response.text()
-
-    if (!roomId.trim()) {
-      throw new Error(
-        "Server returned an empty room ID"
-      )
-    }
+    event.preventDefault()
 
     setCreateError("")
+    setCreateLoading(true)
 
-    setUsername(name)
-    setRoom(roomId.trim())
-    setDocumentReady(false)
-    setJoined(true)
+    const form =
+      event.currentTarget
 
-    const params =
-      new URLSearchParams(
-        window.location.search
+    const name =
+      form.elements.username.value.trim()
+
+    if (!name) {
+      setCreateError(
+        "Please enter a username."
       )
 
-    params.set("room", roomId.trim())
-    params.set("username", name)
+      setCreateLoading(false)
+      return
+    }
 
-    window.history.pushState(
-      {},
-      "",
-      `?${params.toString()}`
-    )
-  } catch (error) {
-    console.error(
-      "Failed to create room",
-      error
-    )
+    try {
+      const response =
+        await fetch(
+          "http://localhost:8080/api/rooms",
+          {
+            method: "POST"
+          }
+        )
 
-    setCreateError(
-      "Unable to create room. Please try again."
-    )
-  } finally {
-    setCreateLoading(false)
+      if (!response.ok) {
+        throw new Error(
+          `Failed to create room: ${response.status}`
+        )
+      }
+
+      const roomId =
+        await response.text()
+
+      if (!roomId.trim()) {
+        throw new Error(
+          "Server returned an empty room ID"
+        )
+      }
+
+      setCreateError("")
+
+      setUsername(name)
+      setRoom(roomId.trim())
+      setDocumentReady(false)
+      setJoined(true)
+
+      const params =
+        new URLSearchParams(
+          window.location.search
+        )
+
+      params.set(
+        "room",
+        roomId.trim()
+      )
+
+      params.set(
+        "username",
+        name
+      )
+
+      window.history.pushState(
+        {},
+        "",
+        `?${params.toString()}`
+      )
+    } catch (error) {
+      console.error(
+        "Failed to create room",
+        error
+      )
+
+      setCreateError(
+        "Unable to create room. Please try again."
+      )
+    } finally {
+      setCreateLoading(false)
+    }
   }
-}
 
   const handleShareRoom = async () => {
     try {
-      // copies the current room link so it can be shared with another user
       await navigator.clipboard.writeText(
         window.location.href
       )
@@ -833,10 +913,10 @@ function App() {
     setDocumentReady(false)
     setJoinError("")
     setCreateError("")
+    setTerminalOpen(false)
 
     setRoom("")
 
-    // removes the room parameter from the browser url
     window.history.pushState(
       {},
       "",
@@ -1080,6 +1160,18 @@ function App() {
 
           <button
             type="button"
+            onClick={() => setTerminalOpen(
+              (current) => !current
+            )}
+            className="px-3 py-1 rounded bg-gray-800 text-white text-sm hover:bg-gray-700"
+          >
+            {terminalOpen
+              ? "Hide Terminal"
+              : "Terminal"}
+          </button>
+
+          <button
+            type="button"
             onClick={handleLeaveRoom}
             className="px-3 py-1 rounded bg-red-500 text-white text-sm hover:bg-red-600"
           >
@@ -1236,7 +1328,13 @@ function App() {
 
               </div>
 
-              <div className="flex-1 min-h-0">
+              <div
+                className={
+                  terminalOpen
+                    ? "flex-1 min-h-0"
+                    : "flex-1 min-h-0"
+                }
+              >
                 <Editor
                   height="100%"
                   language={language}
@@ -1245,6 +1343,31 @@ function App() {
                   onMount={handleMount}
                 />
               </div>
+
+              {terminalOpen && (
+                <div className="h-64 shrink-0 border-t border-gray-700 bg-neutral-900 flex flex-col">
+
+                  <div className="h-9 shrink-0 px-3 flex items-center justify-between border-b border-gray-700 text-sm text-gray-400">
+                    <span>
+                      TERMINAL
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => setTerminalOpen(false)}
+                      className="text-gray-500 hover:text-white"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div
+                    ref={terminalContainerRef}
+                    className="flex-1 min-h-0 p-2"
+                  />
+
+                </div>
+              )}
 
             </div>
           )}
