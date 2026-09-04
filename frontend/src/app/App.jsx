@@ -639,67 +639,156 @@ function App() {
    * It must be created with new Terminal().
    */
   useEffect(() => {
-    if (!terminalOpen) {
-      return
-    }
+  if (!terminalOpen) {
+    return
+  }
 
-    if (!terminalContainerRef.current) {
-      return
-    }
+  if (!terminalContainerRef.current) {
+    return
+  }
 
-    if (terminalRef.current) {
-      terminalRef.current.open(
-        terminalContainerRef.current
-      )
-
-      terminalRef.current.focus()
-
-      return
-    }
-
-    const terminal =
-      new Terminal({
-        cursorBlink: true,
-        fontSize: 14,
-        convertEol: true,
-
-        theme: {
-          background: "#171717",
-          foreground: "#d4d4d4"
-        }
-      })
-
-    terminal.open(
+  if (terminalRef.current) {
+    terminalRef.current.open(
       terminalContainerRef.current
     )
 
+    terminalRef.current.focus()
+
+    return
+  }
+
+  const terminal = new Terminal({
+    cursorBlink: true,
+    fontSize: 14,
+    convertEol: true,
+    theme: {
+      background: "#171717",
+      foreground: "#d4d4d4"
+    }
+  })
+
+  terminal.open(
+    terminalContainerRef.current
+  )
+
+  const protocol =
+    window.location.protocol === "https:"
+      ? "wss:"
+      : "ws:"
+
+  const socket =
+    new WebSocket(
+      `${protocol}//${window.location.hostname}:8080/ws/terminal`
+    )
+
+  socket.binaryType = "arraybuffer"
+
+  socket.onopen = () => {
+    console.log(
+      "Terminal WebSocket connected"
+    )
+  }
+
+  socket.onmessage = (event) => {
     terminal.write(
-      "SyncStream Terminal"
+      event.data
+    )
+  }
+
+  socket.onerror = (error) => {
+    console.error(
+      "Terminal WebSocket error",
+      error
     )
 
     terminal.write(
-      "\r\nPhase 1 terminal ready."
+      "\r\n[Terminal connection error]\r\n"
     )
+  }
 
+  socket.onclose = () => {
     terminal.write(
-      "\r\nCommand execution is not available yet."
+      "\r\n[Terminal disconnected]\r\n"
     )
+  }
 
-    terminal.write(
-      "\r\n\r\n$ "
-    )
+  let command = ""
+
+  terminal.onData((data) => {
+
+    if (
+      data === "\r"
+    ) {
+      terminal.write(
+        "\r\n"
+      )
+
+      if (
+        command.trim()
+      ) {
+        if (
+          socket.readyState ===
+          WebSocket.OPEN
+        ) {
+          socket.send(
+            command
+          )
+        }
+      } else {
+        terminal.write(
+          "$ "
+        )
+      }
+
+      command = ""
+
+      return
+    }
+
+    if (
+      data === "\u007F"
+    ) {
+      if (
+        command.length > 0
+      ) {
+        command =
+          command.slice(
+            0,
+            -1
+          )
+
+        terminal.write(
+          "\b \b"
+        )
+      }
+
+      return
+    }
+
+    if (
+      data >= " " &&
+      data <= "~"
+    ) {
+      command += data
+
+      terminal.write(
+        data
+      )
+    }
+  })
+
+  terminalRef.current =
+    terminal
+
+  return () => {
+    socket.close()
+
+    terminal.dispose()
 
     terminalRef.current =
-      terminal
-
-    return () => {
-      if (terminalRef.current) {
-        terminalRef.current.dispose()
-        terminalRef.current =
-          null
-      }
-    }
-  }, [terminalOpen])
+      null
+  }
+}, [terminalOpen])
 
   /*
    * Focus terminal when opened.
