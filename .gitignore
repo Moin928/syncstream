@@ -1,8 +1,6 @@
 # ================================
-# SyncStream
-# ================================
-
 # Environment variables
+# ================================
 .env
 .env.*
 !.env.example
@@ -10,19 +8,17 @@
 # ================================
 # Backend - Java / Maven
 # ================================
-
 backend/target/
 backend/.mvn/wrapper/maven-wrapper.jar
 
-# Maven
 *.class
 *.jar
 *.war
 *.ear
 
-# Spring logs
-backend/*.log
+# Logs
 *.log
+backend/*.log
 
 # IntelliJ IDEA
 backend/.idea/
@@ -41,17 +37,16 @@ backend/.idea/
 # ================================
 # Frontend - Node / Vite
 # ================================
-
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 
-# Vite environment files
+# Frontend environment files
 frontend/.env
 frontend/.env.*
 !frontend/.env.example
 
-# npm logs
+# npm / package manager logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -60,22 +55,15 @@ pnpm-debug.log*
 # ================================
 # OS generated files
 # ================================
-
-# Windows
 Thumbs.db
 Thumbs.db:encryptable
 Desktop.ini
-
-# macOS
 .DS_Store
-
-# Linux
 *~
 
 # ================================
-# Build / temporary files
+# Temporary files
 # ================================
-
 *.tmp
 *.temp
 *.swp
@@ -84,8 +72,6 @@ Desktop.ini
 # ================================
 # Database backups
 # ================================
-
-# Uncomment these if database dumps should NOT be committed
-# *.sql
-# syncstream_backup.sql
-# syncstream_healthy_backup.sql
+# Keep these ignored unless you intentionally want
+# database dumps committed to Git.
+*.sql
