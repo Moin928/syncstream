@@ -16,9 +16,6 @@ function App() {
   const terminalRef = useRef(null)
   const terminalContainerRef = useRef(null)
 
-  const terminalSocketRef = useRef(null)
-  const terminalInputRef = useRef("")
-
   const connectionTimeoutRef = useRef(null)
 
   const remoteCursorsRef = useRef(new Map())
@@ -34,40 +31,55 @@ function App() {
   const [users, setUsers] = useState([])
 
   const [room, setRoom] = useState(() => {
-    return new URLSearchParams(window.location.search).get("room") || ""
-    return new URLSearchParams(window.location.search).get("room") || ""
-  })
-
-  const [connectionState, setConnectionState] = useState("CONNECTING")
-  const [connectionTimedOut, setConnectionTimedOut] = useState(false)
-  const [documentReady, setDocumentReady] = useState(false)
-
-  const [language, setLanguage] = useState("javascript")
-  const [terminalOpen, setTerminalOpen] = useState(false)
-
-  const [joined, setJoined] = useState(() => {
-    const params = new URLSearchParams(window.location.search)
-    const params = new URLSearchParams(window.location.search)
-
-    return Boolean(
-      params.get("room") &&
-        params.get("username")
+    return (
+      new URLSearchParams(window.location.search).get("room") || ""
     )
   })
 
-  const [shareMessage, setShareMessage] = useState("")
-  const [joinError, setJoinError] = useState("")
-  const [createError, setCreateError] = useState("")
-  const [createLoading, setCreateLoading] = useState(false)
-  const [joinLoading, setJoinLoading] = useState(false)
-  const [shareMessage, setShareMessage] = useState("")
-  const [joinError, setJoinError] = useState("")
-  const [createError, setCreateError] = useState("")
-  const [createLoading, setCreateLoading] = useState(false)
-  const [joinLoading, setJoinLoading] = useState(false)
+  const [connectionState, setConnectionState] =
+    useState("CONNECTING")
 
-  const ydoc = useMemo(() => new Y.Doc(), [])
-  const ydoc = useMemo(() => new Y.Doc(), [])
+  const [connectionTimedOut, setConnectionTimedOut] =
+    useState(false)
+
+  const [documentReady, setDocumentReady] =
+    useState(false)
+
+  const [language, setLanguage] =
+    useState("javascript")
+
+  const [terminalOpen, setTerminalOpen] =
+    useState(false)
+
+  const [joined, setJoined] = useState(() => {
+    const params =
+      new URLSearchParams(window.location.search)
+
+    return Boolean(
+      params.get("room") &&
+      params.get("username")
+    )
+  })
+
+  const [shareMessage, setShareMessage] =
+    useState("")
+
+  const [joinError, setJoinError] =
+    useState("")
+
+  const [createError, setCreateError] =
+    useState("")
+
+  const [createLoading, setCreateLoading] =
+    useState(false)
+
+  const [joinLoading, setJoinLoading] =
+    useState(false)
+
+  const ydoc = useMemo(
+    () => new Y.Doc(),
+    []
+  )
 
   const ymetadata = useMemo(
     () => ydoc.getMap("metadata"),
@@ -79,470 +91,390 @@ function App() {
     [ydoc]
   )
 
+  /*
+   * Creates the WebSocket provider when the user joins a room.
+   */
   useEffect(() => {
     if (!joined) {
       return
     }
 
-    const provider = new SpringWebSocketProvider(
-      room,
-      ydoc,
-      username,
-      setUsers,
-    const provider = new SpringWebSocketProvider(
-      room,
-      ydoc,
-      username,
-      setUsers,
+    const provider =
+      new SpringWebSocketProvider(
+        room,
+        ydoc,
+        username,
+        setUsers,
 
-      (cursor) => {
-        if (cursor.clientId === provider.clientId) {
-          return
-        }
+        /*
+         * Remote cursor
+         */
+        (cursor) => {
+          if (
+            cursor.clientId ===
+            provider.clientId
+          ) {
+            return
+          }
 
-        const editor = editorRef.current
-        const editor = editorRef.current
+          const editor =
+            editorRef.current
 
-        if (!editor) {
-          return
-        }
-        if (!editor) {
-          return
-        }
+          if (!editor) {
+            return
+          }
 
-        const model = editor.getModel()
-        const model = editor.getModel()
+          const model =
+            editor.getModel()
 
-        if (!model) {
-          return
-        }
-        if (!model) {
-          return
-        }
+          if (!model) {
+            return
+          }
 
-        const lineNumber = Math.max(
-          1,
-          Math.min(
-            cursor.lineNumber,
-            model.getLineCount()
+          const lineNumber =
+            Math.max(
+              1,
+              Math.min(
+                cursor.lineNumber,
+                model.getLineCount()
+              )
+            )
+
+          const maxColumn =
+            model.getLineMaxColumn(
+              lineNumber
+            )
+
+          const column =
+            Math.max(
+              1,
+              Math.min(
+                cursor.column,
+                maxColumn
+              )
+            )
+
+          const oldDecoration =
+            remoteCursorsRef.current.get(
+              cursor.clientId
+            )
+
+          const decorations =
+            editor.deltaDecorations(
+              oldDecoration
+                ? [oldDecoration]
+                : [],
+              [
+                {
+                  range: {
+                    startLineNumber:
+                      lineNumber,
+                    startColumn:
+                      column,
+                    endLineNumber:
+                      lineNumber,
+                    endColumn:
+                      column
+                  },
+                  options: {
+                    beforeContentClassName:
+                      "remote-cursor"
+                  }
+                }
+              ]
+            )
+
+          remoteCursorsRef.current.set(
+            cursor.clientId,
+            decorations[0]
           )
-        )
-        const lineNumber = Math.max(
-          1,
-          Math.min(
-            cursor.lineNumber,
-            model.getLineCount()
-          )
-        )
 
-        const maxColumn =
-          model.getLineMaxColumn(lineNumber)
-        const maxColumn =
-          model.getLineMaxColumn(lineNumber)
+          let widget =
+            remoteCursorWidgetsRef.current.get(
+              cursor.clientId
+            )
 
-        const column = Math.max(
-          1,
-          Math.min(cursor.column, maxColumn)
-        )
+          if (!widget) {
+            widget = {
+              id:
+                `remote-cursor-${cursor.clientId}`,
 
-        const oldDecoration =
-          remoteCursorsRef.current.get(
-            cursor.clientId
-          )
-        const oldDecoration =
-          remoteCursorsRef.current.get(
-            cursor.clientId
-          )
+              position: {
+                lineNumber,
+                column
+              },
 
-        const decorations =
-          editor.deltaDecorations(
-            oldDecoration ? [oldDecoration] : [],
-            [
-              {
-                range: {
-                  startLineNumber: lineNumber,
-                  startColumn: column,
-                  endLineNumber: lineNumber,
-                  endColumn: column
-                },
-                options: {
-                  beforeContentClassName:
-                    "remote-cursor"
+              username:
+                cursor.username,
+
+              domNode: null,
+
+              getId() {
+                return this.id
+              },
+
+              getDomNode() {
+                if (!this.domNode) {
+                  const node =
+                    document.createElement(
+                      "div"
+                    )
+
+                  node.className =
+                    "remote-cursor-label"
+
+                  node.textContent =
+                    this.username
+
+                  this.domNode =
+                    node
+                }
+
+                return this.domNode
+              },
+
+              getPosition() {
+                return {
+                  position:
+                    this.position,
+                  preference: [
+                    1,
+                    2
+                  ]
                 }
               }
-            ]
-          )
+            }
 
-        remoteCursorsRef.current.set(
-          cursor.clientId,
-          decorations[0]
-        )
-        remoteCursorsRef.current.set(
-          cursor.clientId,
-          decorations[0]
-        )
+            remoteCursorWidgetsRef.current.set(
+              cursor.clientId,
+              widget
+            )
 
-        let widget =
-          remoteCursorWidgetsRef.current.get(
-            cursor.clientId
-          )
-        let widget =
-          remoteCursorWidgetsRef.current.get(
-            cursor.clientId
-          )
-
-        if (!widget) {
-          widget = {
-            id: `remote-cursor-${cursor.clientId}`,
-        if (!widget) {
-          widget = {
-            id: `remote-cursor-${cursor.clientId}`,
-
-            position: {
+            editor.addContentWidget(
+              widget
+            )
+          } else {
+            widget.position = {
               lineNumber,
               column
-            },
-            position: {
-              lineNumber,
-              column
-            },
-
-            username: cursor.username,
-            username: cursor.username,
-
-            domNode: null,
-            domNode: null,
-
-            getId() {
-              return this.id
-            },
-            getId() {
-              return this.id
-            },
-
-            getDomNode() {
-              if (!this.domNode) {
-                const node =
-                  document.createElement("div")
-            getDomNode() {
-              if (!this.domNode) {
-                const node =
-                  document.createElement("div")
-
-                node.className =
-                  "remote-cursor-label"
-                node.className =
-                  "remote-cursor-label"
-
-                node.textContent = this.username
-
-                this.domNode = node
-              }
-                this.domNode = node
-              }
-
-              return this.domNode
-            },
-              return this.domNode
-            },
-
-            getPosition() {
-              return {
-                position: this.position,
-                preference: [1, 2]
-              }
             }
-          }
-            getPosition() {
-              return {
-                position: this.position,
-                preference: [1, 2]
-              }
+
+            widget.username =
+              cursor.username
+
+            if (widget.domNode) {
+              widget.domNode.textContent =
+                cursor.username
             }
-          }
 
-          remoteCursorWidgetsRef.current.set(
-            cursor.clientId,
-            widget
-          )
-          remoteCursorWidgetsRef.current.set(
-            cursor.clientId,
-            widget
-          )
-
-          editor.addContentWidget(widget)
-        } else {
-          widget.position = {
-            lineNumber,
-            column
-          }
-          editor.addContentWidget(widget)
-        } else {
-          widget.position = {
-            lineNumber,
-            column
-          }
-
-          widget.username = cursor.username
-
-          if (widget.domNode) {
-            widget.domNode.textContent =
-              cursor.username
-          }
-          if (widget.domNode) {
-            widget.domNode.textContent =
-              cursor.username
-          }
-
-          editor.layoutContentWidget(widget)
-        }
-      },
-          editor.layoutContentWidget(widget)
-        }
-      },
-
-      (clientId) => {
-        const editor = editorRef.current
-
-        if (!editor) {
-          return
-        }
-        if (!editor) {
-          return
-        }
-
-        const decoration =
-          remoteCursorsRef.current.get(clientId)
-        const decoration =
-          remoteCursorsRef.current.get(clientId)
-
-        if (decoration) {
-          editor.deltaDecorations(
-            [decoration],
-            []
-          )
-        if (decoration) {
-          editor.deltaDecorations(
-            [decoration],
-            []
-          )
-
-          remoteCursorsRef.current.delete(
-            clientId
-          )
-        }
-          remoteCursorsRef.current.delete(
-            clientId
-          )
-        }
-
-        const widget =
-          remoteCursorWidgetsRef.current.get(
-            clientId
-          )
-        const widget =
-          remoteCursorWidgetsRef.current.get(
-            clientId
-          )
-
-        if (widget) {
-          editor.removeContentWidget(widget)
-        if (widget) {
-          editor.removeContentWidget(widget)
-
-          remoteCursorWidgetsRef.current.delete(
-            clientId
-          )
-        }
-          remoteCursorWidgetsRef.current.delete(
-            clientId
-          )
-        }
-
-        const selection =
-          remoteSelectionsRef.current.get(
-            clientId
-          )
-        const selection =
-          remoteSelectionsRef.current.get(
-            clientId
-          )
-
-        if (selection) {
-          editor.deltaDecorations(
-            [selection],
-            []
-          )
-        if (selection) {
-          editor.deltaDecorations(
-            [selection],
-            []
-          )
-
-          remoteSelectionsRef.current.delete(
-            clientId
-          )
-        }
-      },
-          remoteSelectionsRef.current.delete(
-            clientId
-          )
-        }
-      },
-
-      (selection) => {
-        if (
-          selection.clientId ===
-          provider.clientId
-        ) {
-          return
-        }
-
-        const editor = editorRef.current
-        const editor = editorRef.current
-
-        if (!editor) {
-          return
-        }
-        if (!editor) {
-          return
-        }
-
-        const model = editor.getModel()
-        const model = editor.getModel()
-
-        if (!model) {
-          return
-        }
-        if (!model) {
-          return
-        }
-
-        const clientId = selection.clientId
-        const remoteSelection =
-          selection.selection
-
-        const oldDecoration =
-          remoteSelectionsRef.current.get(
-            clientId
-          )
-        const oldDecoration =
-          remoteSelectionsRef.current.get(
-            clientId
-          )
-
-        if (oldDecoration) {
-          editor.deltaDecorations(
-            [oldDecoration],
-            []
-          )
-        if (oldDecoration) {
-          editor.deltaDecorations(
-            [oldDecoration],
-            []
-          )
-
-          remoteSelectionsRef.current.delete(
-            clientId
-          )
-        }
-          remoteSelectionsRef.current.delete(
-            clientId
-          )
-        }
-
-        if (!remoteSelection) {
-          return
-        }
-        if (!remoteSelection) {
-          return
-        }
-
-        const startLineNumber = Math.max(
-          1,
-          Math.min(
-            remoteSelection.startLineNumber,
-            model.getLineCount()
-          )
-        )
-
-        const endLineNumber = Math.max(
-          startLineNumber,
-          Math.min(
-            remoteSelection.endLineNumber,
-            model.getLineCount()
-          )
-        )
-
-        const startColumn = Math.max(
-          1,
-          Math.min(
-            remoteSelection.startColumn,
-            model.getLineMaxColumn(
-              startLineNumber
+            editor.layoutContentWidget(
+              widget
             )
-          )
-        )
+          }
+        },
 
-        const endColumn = Math.max(
-          1,
-          Math.min(
-            remoteSelection.endColumn,
-            model.getLineMaxColumn(
-              endLineNumber
+        /*
+         * Remote user disconnected
+         */
+        (clientId) => {
+          const editor =
+            editorRef.current
+
+          if (!editor) {
+            return
+          }
+
+          const decoration =
+            remoteCursorsRef.current.get(
+              clientId
             )
-          )
-        )
 
-        const decorations =
-          editor.deltaDecorations(
-            [],
-            [
-              {
-                range: {
-                  startLineNumber,
-                  startColumn,
-                  endLineNumber,
-                  endColumn
-                },
-                options: {
-                  className:
-                    "remote-selection"
+          if (decoration) {
+            editor.deltaDecorations(
+              [decoration],
+              []
+            )
+
+            remoteCursorsRef.current.delete(
+              clientId
+            )
+          }
+
+          const widget =
+            remoteCursorWidgetsRef.current.get(
+              clientId
+            )
+
+          if (widget) {
+            editor.removeContentWidget(
+              widget
+            )
+
+            remoteCursorWidgetsRef.current.delete(
+              clientId
+            )
+          }
+
+          const selection =
+            remoteSelectionsRef.current.get(
+              clientId
+            )
+
+          if (selection) {
+            editor.deltaDecorations(
+              [selection],
+              []
+            )
+
+            remoteSelectionsRef.current.delete(
+              clientId
+            )
+          }
+        },
+
+        /*
+         * Remote selection
+         */
+        (selection) => {
+          if (
+            selection.clientId ===
+            provider.clientId
+          ) {
+            return
+          }
+
+          const editor =
+            editorRef.current
+
+          if (!editor) {
+            return
+          }
+
+          const model =
+            editor.getModel()
+
+          if (!model) {
+            return
+          }
+
+          const clientId =
+            selection.clientId
+
+          const remoteSelection =
+            selection.selection
+
+          const oldDecoration =
+            remoteSelectionsRef.current.get(
+              clientId
+            )
+
+          if (oldDecoration) {
+            editor.deltaDecorations(
+              [oldDecoration],
+              []
+            )
+
+            remoteSelectionsRef.current.delete(
+              clientId
+            )
+          }
+
+          if (!remoteSelection) {
+            return
+          }
+
+          const startLineNumber =
+            Math.max(
+              1,
+              Math.min(
+                remoteSelection.startLineNumber,
+                model.getLineCount()
+              )
+            )
+
+          const endLineNumber =
+            Math.max(
+              startLineNumber,
+              Math.min(
+                remoteSelection.endLineNumber,
+                model.getLineCount()
+              )
+            )
+
+          const startColumn =
+            Math.max(
+              1,
+              Math.min(
+                remoteSelection.startColumn,
+                model.getLineMaxColumn(
+                  startLineNumber
+                )
+              )
+            )
+
+          const endColumn =
+            Math.max(
+              1,
+              Math.min(
+                remoteSelection.endColumn,
+                model.getLineMaxColumn(
+                  endLineNumber
+                )
+              )
+            )
+
+          const decorations =
+            editor.deltaDecorations(
+              [],
+              [
+                {
+                  range: {
+                    startLineNumber,
+                    startColumn,
+                    endLineNumber,
+                    endColumn
+                  },
+
+                  options: {
+                    className:
+                      "remote-selection"
+                  }
                 }
-              }
-            ]
+              ]
+            )
+
+          remoteSelectionsRef.current.set(
+            clientId,
+            decorations[0]
           )
+        },
 
-        remoteSelectionsRef.current.set(
-          clientId,
-          decorations[0]
-        )
-      },
-        remoteSelectionsRef.current.set(
-          clientId,
-          decorations[0]
-        )
-      },
+        /*
+         * Connection state
+         */
+        (state) => {
+          setConnectionState(state)
+        },
 
-      (state) => {
-        setConnectionState(state)
-      },
+        /*
+         * Document synchronization completed
+         */
+        () => {
+          setDocumentReady(true)
+        }
+      )
 
-      () => {
-        setDocumentReady(true)
-      }
-    )
-
-    providerRef.current = provider
-    providerRef.current = provider
+    providerRef.current =
+      provider
 
     return () => {
       provider.disconnect()
 
-      providerRef.current = null
+      providerRef.current =
+        null
 
-      const editor = editorRef.current
-      const editor = editorRef.current
+      const editor =
+        editorRef.current
 
       if (editor) {
         const decorations = [
@@ -558,8 +490,9 @@ function App() {
           const widget of
           remoteCursorWidgetsRef.current.values()
         ) {
-          editor.removeContentWidget(widget)
-          editor.removeContentWidget(widget)
+          editor.removeContentWidget(
+            widget
+          )
         }
 
         const selectionDecorations = [
@@ -583,22 +516,27 @@ function App() {
     ydoc
   ])
 
+  /*
+   * Shared language metadata.
+   */
   useEffect(() => {
     const handleLanguageChange = () => {
       const sharedLanguage =
         ymetadata.get("language")
 
       if (
-        typeof sharedLanguage === "string"
-        typeof sharedLanguage === "string"
+        typeof sharedLanguage ===
+        "string"
       ) {
-        setLanguage(sharedLanguage)
-        setLanguage(sharedLanguage)
+        setLanguage(
+          sharedLanguage
+        )
       }
     }
 
-    if (!ymetadata.has("language")) {
-    if (!ymetadata.has("language")) {
+    if (
+      !ymetadata.has("language")
+    ) {
       ymetadata.set(
         "language",
         "javascript"
@@ -618,18 +556,22 @@ function App() {
     }
   }, [ymetadata])
 
+  /*
+   * Connection timeout.
+   */
   useEffect(() => {
     if (!joined) {
       setConnectionTimedOut(false)
 
-      if (connectionTimeoutRef.current) {
-      if (connectionTimeoutRef.current) {
+      if (
+        connectionTimeoutRef.current
+      ) {
         clearTimeout(
           connectionTimeoutRef.current
         )
 
-        connectionTimeoutRef.current = null
-        connectionTimeoutRef.current = null
+        connectionTimeoutRef.current =
+          null
       }
 
       return
@@ -641,83 +583,61 @@ function App() {
       setTimeout(() => {
         setConnectionTimedOut(true)
 
-        connectionTimeoutRef.current = null
+        connectionTimeoutRef.current =
+          null
       }, 15000)
 
     return () => {
-      if (connectionTimeoutRef.current) {
-      if (connectionTimeoutRef.current) {
+      if (
+        connectionTimeoutRef.current
+      ) {
         clearTimeout(
           connectionTimeoutRef.current
         )
 
-        connectionTimeoutRef.current = null
-        connectionTimeoutRef.current = null
+        connectionTimeoutRef.current =
+          null
       }
     }
   }, [joined])
 
+  /*
+   * Stop the connection timeout once connected.
+   */
   useEffect(() => {
     if (
-      connectionState !== "CONNECTED"
+      connectionState !==
+      "CONNECTED"
     ) {
       return
     }
 
     setConnectionTimedOut(false)
 
-    if (connectionTimeoutRef.current) {
-    if (connectionTimeoutRef.current) {
+    if (
+      connectionTimeoutRef.current
+    ) {
       clearTimeout(
         connectionTimeoutRef.current
       )
 
-      connectionTimeoutRef.current = null
-      connectionTimeoutRef.current = null
+      connectionTimeoutRef.current =
+        null
     }
   }, [connectionState])
 
+  /*
+   * Xterm terminal.
+   */
   useEffect(() => {
     if (!terminalOpen) {
       return
     }
-    if (!terminalOpen) {
-      return
-    }
 
     if (!terminalContainerRef.current) {
       return
     }
-    if (!terminalContainerRef.current) {
-      return
-    }
 
-    if (terminalRef.current) {
-      terminalRef.current.open(
-        terminalContainerRef.current
-      )
-    if (terminalRef.current) {
-      terminalRef.current.open(
-        terminalContainerRef.current
-      )
-
-      terminalRef.current.focus()
-      terminalRef.current.focus()
-
-      return
-    }
-      return
-    }
-
-    const terminal = new Terminal({
-      cursorBlink: true,
-      fontSize: 14,
-      convertEol: true,
-      theme: {
-        background: "#171717",
-        foreground: "#d4d4d4"
-      }
-    })
     const terminal = new Terminal({
       cursorBlink: true,
       fontSize: 14,
@@ -736,33 +656,53 @@ function App() {
       window.location.protocol === "https:"
         ? "wss:"
         : "ws:"
-    const protocol =
-      window.location.protocol === "https:"
-        ? "wss:"
-        : "ws:"
 
-    const socket = new WebSocket(
-      `${protocol}//${window.location.host}/ws/terminal?room=${encodeURIComponent(
-        room
-      )}&username=${encodeURIComponent(
-        username
-      )}&clientId=${encodeURIComponent(
-        providerRef.current?.clientId || ""
-      )}`
-    )
+    const clientId =
+      providerRef.current?.clientId || ""
 
-    socket.binaryType = "arraybuffer"
+    const socket =
+      new WebSocket(
+        `${protocol}//${window.location.hostname}:8080/ws/terminal?room=${encodeURIComponent(
+          room
+        )}&username=${encodeURIComponent(
+          username
+        )}&clientId=${encodeURIComponent(
+          clientId
+        )}`
+      )
+
+    socket.binaryType =
+      "arraybuffer"
 
     socket.onopen = () => {
       console.log(
         "Terminal WebSocket connected"
       )
-
-      terminal.write("$ ")
     }
 
     socket.onmessage = (event) => {
-      terminal.write(event.data)
+      if (
+        typeof event.data ===
+        "string"
+      ) {
+        terminal.write(
+          event.data
+        )
+        return
+      }
+
+      if (
+        event.data instanceof
+        ArrayBuffer
+      ) {
+        terminal.write(
+          new TextDecoder().decode(
+            new Uint8Array(
+              event.data
+            )
+          )
+        )
+      }
     }
 
     socket.onerror = (error) => {
@@ -770,16 +710,7 @@ function App() {
         "Terminal WebSocket error",
         error
       )
-    socket.onerror = (error) => {
-      console.error(
-        "Terminal WebSocket error",
-        error
-      )
 
-      terminal.write(
-        "\r\n[Terminal connection error]\r\n"
-      )
-    }
       terminal.write(
         "\r\n[Terminal connection error]\r\n"
       )
@@ -793,35 +724,49 @@ function App() {
 
     let command = ""
 
-    const dataDisposable = terminal.onData(
-      (data) => {
-        if (data === "\r") {
-          terminal.write("\r\n")
+    const dataDisposable =
+      terminal.onData((data) => {
+        if (
+          data === "\r" ||
+          data === "\n"
+        ) {
+          terminal.write(
+            "\r\n"
+          )
 
-          if (command.trim()) {
+          if (
+            command.trim()
+          ) {
             if (
               socket.readyState ===
               WebSocket.OPEN
             ) {
-              socket.send(command)
+              socket.send(
+                command
+              )
             }
           } else {
-            terminal.write("$ ")
+            terminal.write(
+              "$ "
+            )
           }
 
           command = ""
 
           return
         }
-          return
-        }
 
-        if (data === "\u007F") {
-          if (command.length > 0) {
-            command = command.slice(
-              0,
-              -1
-            )
+        if (
+          data === "\u007F"
+        ) {
+          if (
+            command.length > 0
+          ) {
+            command =
+              command.slice(
+                0,
+                -1
+              )
 
             terminal.write(
               "\b \b"
@@ -830,6 +775,16 @@ function App() {
 
           return
         }
+
+        if (
+          data === "\u0003"
+        ) {
+          command = ""
+
+          terminal.write(
+            "^C\r\n$ "
+          )
+
           return
         }
 
@@ -838,24 +793,42 @@ function App() {
           data <= "~"
         ) {
           command += data
-          terminal.write(data)
-        }
-      }
-    )
 
-    terminalRef.current = terminal
-    terminalRef.current = terminal
+          terminal.write(
+            data
+          )
+        }
+      })
+
+    terminalRef.current =
+      terminal
 
     return () => {
       dataDisposable.dispose()
 
-      socket.close()
+      if (
+        socket.readyState ===
+          WebSocket.OPEN ||
+        socket.readyState ===
+          WebSocket.CONNECTING
+      ) {
+        socket.close()
+      }
+
       terminal.dispose()
 
-      terminalRef.current = null
+      terminalRef.current =
+        null
     }
-  }, [terminalOpen])
+  }, [
+    terminalOpen,
+    room,
+    username
+  ])
 
+  /*
+   * Focus terminal when opened.
+   */
   useEffect(() => {
     if (
       terminalOpen &&
@@ -865,9 +838,12 @@ function App() {
     }
   }, [terminalOpen])
 
+  /*
+   * Monaco editor setup.
+   */
   const handleMount = (editor) => {
-    editorRef.current = editor
-    editorRef.current = editor
+    editorRef.current =
+      editor
 
     new MonacoBinding(
       yText,
@@ -875,9 +851,13 @@ function App() {
       new Set([editor])
     )
 
+    /*
+     * Cursor tracking.
+     */
     editor.onDidChangeCursorPosition(
       (event) => {
-        const position = event.position
+        const position =
+          event.position
 
         providerRef.current?.sendCursorPosition(
           position.lineNumber,
@@ -886,9 +866,13 @@ function App() {
       }
     )
 
+    /*
+     * Selection tracking.
+     */
     editor.onDidChangeCursorSelection(
       (event) => {
-        const selection = event.selection
+        const selection =
+          event.selection
 
         const hasSelection =
           selection.startLineNumber !==
@@ -917,14 +901,17 @@ function App() {
     )
   }
 
+  /*
+   * Join room.
+   */
   const handleJoin = async (event) => {
     event.preventDefault()
 
     setJoinError("")
     setJoinLoading(true)
 
-    const form = event.currentTarget
-    const form = event.currentTarget
+    const form =
+      event.currentTarget
 
     const name =
       form.elements.username.value.trim()
@@ -933,7 +920,8 @@ function App() {
       form.elements.room?.value.trim()
 
     const roomId =
-      roomInput || room.trim()
+      roomInput ||
+      room.trim()
 
     if (!name) {
       setJoinError(
@@ -954,22 +942,26 @@ function App() {
     }
 
     try {
-      const response = await fetch(
-        `http://localhost:8080/api/rooms/${encodeURIComponent(
-          roomId
-        )}`,
-        {
-          method: "GET",
-          headers: {
-            Accept:
-              "application/json, text/plain, */*"
+      const response =
+        await fetch(
+          `http://localhost:8080/api/rooms/${encodeURIComponent(
+            roomId
+          )}`,
+          {
+            method: "GET",
+
+            headers: {
+              Accept:
+                "application/json, text/plain, */*"
+            }
           }
-        }
-      )
+        )
 
       if (!response.ok) {
-        if (response.status === 404) {
-        if (response.status === 404) {
+        if (
+          response.status ===
+          404
+        ) {
           setJoinError(
             "Room not found. Check the room ID and try again."
           )
@@ -983,6 +975,7 @@ function App() {
       }
 
       setJoinError("")
+
       setUsername(name)
       setRoom(roomId)
       setDocumentReady(false)
@@ -993,10 +986,15 @@ function App() {
           window.location.search
         )
 
-      params.set("room", roomId)
-      params.set("username", name)
-      params.set("room", roomId)
-      params.set("username", name)
+      params.set(
+        "room",
+        roomId
+      )
+
+      params.set(
+        "username",
+        name
+      )
 
       window.history.pushState(
         {},
@@ -1017,6 +1015,9 @@ function App() {
     }
   }
 
+  /*
+   * Create room.
+   */
   const handleCreateRoom = async (
     event
   ) => {
@@ -1025,8 +1026,8 @@ function App() {
     setCreateError("")
     setCreateLoading(true)
 
-    const form = event.currentTarget
-    const form = event.currentTarget
+    const form =
+      event.currentTarget
 
     const name =
       form.elements.username.value.trim()
@@ -1041,18 +1042,13 @@ function App() {
     }
 
     try {
-      const response = await fetch(
-        "http://localhost:8080/api/rooms",
-        {
-          method: "POST"
-        }
-      )
-      const response = await fetch(
-        "http://localhost:8080/api/rooms",
-        {
-          method: "POST"
-        }
-      )
+      const response =
+        await fetch(
+          "http://localhost:8080/api/rooms",
+          {
+            method: "POST"
+          }
+        )
 
       if (!response.ok) {
         throw new Error(
@@ -1073,6 +1069,7 @@ function App() {
         roomId.trim()
 
       setCreateError("")
+
       setUsername(name)
       setRoom(cleanRoomId)
       setDocumentReady(false)
@@ -1112,6 +1109,9 @@ function App() {
     }
   }
 
+  /*
+   * Share room.
+   */
   const handleShareRoom = async () => {
     try {
       await navigator.clipboard.writeText(
@@ -1137,6 +1137,9 @@ function App() {
     }
   }
 
+  /*
+   * Leave room.
+   */
   const handleLeaveRoom = () => {
     setJoined(false)
     setUsername("")
@@ -1155,6 +1158,9 @@ function App() {
     )
   }
 
+  /*
+   * Connection status display.
+   */
   const getConnectionStatus = () => {
     switch (connectionState) {
       case "CONNECTED":
@@ -1170,6 +1176,7 @@ function App() {
             connectionTimedOut
               ? "Connection unavailable"
               : "Connecting...",
+
           className:
             connectionTimedOut
               ? "bg-red-500/15 text-red-400"
@@ -1182,6 +1189,7 @@ function App() {
             connectionTimedOut
               ? "Connection unavailable"
               : "Reconnecting...",
+
           className:
             connectionTimedOut
               ? "bg-red-500/15 text-red-400"
@@ -1204,6 +1212,9 @@ function App() {
     }
   }
 
+  /*
+   * Join/create screen.
+   */
   if (!joined) {
     const hasRoomFromUrl =
       Boolean(room.trim())
@@ -1211,6 +1222,7 @@ function App() {
     return (
       <main className="h-screen w-full bg-gray-950 flex items-center justify-center p-4">
         <div className="w-full max-w-md bg-neutral-900 rounded-xl p-6 shadow-xl">
+
           <h1 className="text-3xl font-bold text-white text-center">
             SyncStream
           </h1>
@@ -1344,8 +1356,11 @@ function App() {
 
   return (
     <main className="h-screen w-full bg-gray-950 flex flex-col gap-3 p-4">
+
       <header className="w-full bg-neutral-900 rounded-lg px-4 py-3 flex items-center justify-between">
+
         <div className="flex items-center gap-4">
+
           <div>
             <h1 className="text-lg font-bold text-white">
               SyncStream
@@ -1362,9 +1377,11 @@ function App() {
               {username}
             </span>
           </div>
+
         </div>
 
         <div className="flex items-center gap-3">
+
           <div
             className={`px-3 py-1 rounded text-sm font-medium ${connectionStatus.className}`}
           >
@@ -1404,6 +1421,7 @@ function App() {
           >
             Leave
           </button>
+
         </div>
       </header>
 
@@ -1414,36 +1432,45 @@ function App() {
       )}
 
       <div className="flex flex-1 gap-4 min-h-0">
+
         <aside className="h-full w-1/4 bg-amber-50 rounded-lg overflow-hidden">
+
           <h2 className="text-2xl font-bold p-4 border-b border-gray-300">
             Users
           </h2>
 
           <ul className="p-4 overflow-y-auto">
-            {users.map((user) => (
-              <li
-                key={user.clientId}
-                className="p-2 bg-gray-800 text-white rounded mb-2 flex items-center gap-2"
-              >
-                <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
+            {users.map(
+              (user) => (
+                <li
+                  key={user.clientId}
+                  className="p-2 bg-gray-800 text-white rounded mb-2 flex items-center gap-2"
+                >
+                  <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
 
-                <span className="text-white">
-                  {user.username}
-                </span>
-
-                {user.username === username && (
-                  <span className="ml-auto text-xs text-gray-400">
-                    You
+                  <span className="text-white">
+                    {user.username}
                   </span>
-                )}
-              </li>
-            ))}
+
+                  {user.username ===
+                    username && (
+                    <span className="ml-auto text-xs text-gray-400">
+                      You
+                    </span>
+                  )}
+                </li>
+              )
+            )}
           </ul>
+
         </aside>
 
         <section className="flex-1 bg-neutral-800 rounded-lg overflow-hidden flex flex-col">
-          {connectionState !== "CONNECTED" && (
+
+          {connectionState !==
+            "CONNECTED" && (
             <div className="px-4 py-2 bg-gray-900 text-gray-400 text-sm">
+
               {connectionTimedOut &&
                 "Unable to connect to the room. Retrying..."}
 
@@ -1461,20 +1488,23 @@ function App() {
                 connectionState ===
                   "DISCONNECTED" &&
                 "Disconnected from the room."}
+
             </div>
           )}
 
           {!documentReady &&
             connectionState ===
               "CONNECTED" && (
-              <div className="flex-1 flex items-center justify-center text-gray-400">
-                Syncing document...
-              </div>
-            )}
+            <div className="flex-1 flex items-center justify-center text-gray-400">
+              Syncing document...
+            </div>
+          )}
 
           {documentReady && (
             <div className="flex-1 min-h-0 flex flex-col">
+
               <div className="px-3 py-2 bg-neutral-900 border-b border-gray-700 flex items-center justify-between">
+
                 <label
                   htmlFor="language"
                   className="text-sm text-gray-400"
@@ -1541,6 +1571,7 @@ function App() {
                     SQL
                   </option>
                 </select>
+
               </div>
 
               <div className="flex-1 min-h-0">
@@ -1555,7 +1586,9 @@ function App() {
 
               {terminalOpen && (
                 <div className="h-64 shrink-0 border-t border-gray-700 bg-neutral-900 flex flex-col">
+
                   <div className="h-9 shrink-0 px-3 flex items-center justify-between border-b border-gray-700 text-sm text-gray-400">
+
                     <span>
                       TERMINAL
                     </span>
@@ -1569,18 +1602,26 @@ function App() {
                     >
                       ×
                     </button>
+
                   </div>
 
                   <div
-                    ref={terminalContainerRef}
+                    ref={
+                      terminalContainerRef
+                    }
                     className="flex-1 min-h-0 p-2"
                   />
+
                 </div>
               )}
+
             </div>
           )}
+
         </section>
+
       </div>
+
     </main>
   )
 }
