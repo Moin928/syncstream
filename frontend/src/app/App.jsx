@@ -16,6 +16,9 @@ function App() {
   const terminalRef = useRef(null)
   const terminalContainerRef = useRef(null)
 
+  const terminalSocketRef = useRef(null)
+  const terminalInputRef = useRef("")
+
   const connectionTimeoutRef = useRef(null)
 
   const remoteCursorsRef = useRef(new Map())
@@ -32,29 +35,23 @@ function App() {
 
   const [room, setRoom] = useState(() => {
     return new URLSearchParams(window.location.search).get("room") || ""
+    return new URLSearchParams(window.location.search).get("room") || ""
   })
 
-  const [connectionState, setConnectionState] =
-    useState("CONNECTING")
+  const [connectionState, setConnectionState] = useState("CONNECTING")
+  const [connectionTimedOut, setConnectionTimedOut] = useState(false)
+  const [documentReady, setDocumentReady] = useState(false)
 
-  const [connectionTimedOut, setConnectionTimedOut] =
-    useState(false)
-
-  const [documentReady, setDocumentReady] =
-    useState(false)
-
-  const [language, setLanguage] =
-    useState("javascript")
-
-  const [terminalOpen, setTerminalOpen] =
-    useState(false)
+  const [language, setLanguage] = useState("javascript")
+  const [terminalOpen, setTerminalOpen] = useState(false)
 
   const [joined, setJoined] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
     const params = new URLSearchParams(window.location.search)
 
     return Boolean(
       params.get("room") &&
-      params.get("username")
+        params.get("username")
     )
   })
 
@@ -63,7 +60,13 @@ function App() {
   const [createError, setCreateError] = useState("")
   const [createLoading, setCreateLoading] = useState(false)
   const [joinLoading, setJoinLoading] = useState(false)
+  const [shareMessage, setShareMessage] = useState("")
+  const [joinError, setJoinError] = useState("")
+  const [createError, setCreateError] = useState("")
+  const [createLoading, setCreateLoading] = useState(false)
+  const [joinLoading, setJoinLoading] = useState(false)
 
+  const ydoc = useMemo(() => new Y.Doc(), [])
   const ydoc = useMemo(() => new Y.Doc(), [])
 
   const ymetadata = useMemo(
@@ -86,6 +89,11 @@ function App() {
       ydoc,
       username,
       setUsers,
+    const provider = new SpringWebSocketProvider(
+      room,
+      ydoc,
+      username,
+      setUsers,
 
       (cursor) => {
         if (cursor.clientId === provider.clientId) {
@@ -93,13 +101,21 @@ function App() {
         }
 
         const editor = editorRef.current
+        const editor = editorRef.current
 
+        if (!editor) {
+          return
+        }
         if (!editor) {
           return
         }
 
         const model = editor.getModel()
+        const model = editor.getModel()
 
+        if (!model) {
+          return
+        }
         if (!model) {
           return
         }
@@ -111,7 +127,16 @@ function App() {
             model.getLineCount()
           )
         )
+        const lineNumber = Math.max(
+          1,
+          Math.min(
+            cursor.lineNumber,
+            model.getLineCount()
+          )
+        )
 
+        const maxColumn =
+          model.getLineMaxColumn(lineNumber)
         const maxColumn =
           model.getLineMaxColumn(lineNumber)
 
@@ -120,6 +145,10 @@ function App() {
           Math.min(cursor.column, maxColumn)
         )
 
+        const oldDecoration =
+          remoteCursorsRef.current.get(
+            cursor.clientId
+          )
         const oldDecoration =
           remoteCursorsRef.current.get(
             cursor.clientId
@@ -148,7 +177,15 @@ function App() {
           cursor.clientId,
           decorations[0]
         )
+        remoteCursorsRef.current.set(
+          cursor.clientId,
+          decorations[0]
+        )
 
+        let widget =
+          remoteCursorWidgetsRef.current.get(
+            cursor.clientId
+          )
         let widget =
           remoteCursorWidgetsRef.current.get(
             cursor.clientId
@@ -157,16 +194,28 @@ function App() {
         if (!widget) {
           widget = {
             id: `remote-cursor-${cursor.clientId}`,
+        if (!widget) {
+          widget = {
+            id: `remote-cursor-${cursor.clientId}`,
 
+            position: {
+              lineNumber,
+              column
+            },
             position: {
               lineNumber,
               column
             },
 
             username: cursor.username,
+            username: cursor.username,
 
             domNode: null,
+            domNode: null,
 
+            getId() {
+              return this.id
+            },
             getId() {
               return this.id
             },
@@ -175,7 +224,13 @@ function App() {
               if (!this.domNode) {
                 const node =
                   document.createElement("div")
+            getDomNode() {
+              if (!this.domNode) {
+                const node =
+                  document.createElement("div")
 
+                node.className =
+                  "remote-cursor-label"
                 node.className =
                   "remote-cursor-label"
 
@@ -183,10 +238,21 @@ function App() {
 
                 this.domNode = node
               }
+                this.domNode = node
+              }
 
               return this.domNode
             },
+              return this.domNode
+            },
 
+            getPosition() {
+              return {
+                position: this.position,
+                preference: [1, 2]
+              }
+            }
+          }
             getPosition() {
               return {
                 position: this.position,
@@ -199,7 +265,17 @@ function App() {
             cursor.clientId,
             widget
           )
+          remoteCursorWidgetsRef.current.set(
+            cursor.clientId,
+            widget
+          )
 
+          editor.addContentWidget(widget)
+        } else {
+          widget.position = {
+            lineNumber,
+            column
+          }
           editor.addContentWidget(widget)
         } else {
           widget.position = {
@@ -213,7 +289,14 @@ function App() {
             widget.domNode.textContent =
               cursor.username
           }
+          if (widget.domNode) {
+            widget.domNode.textContent =
+              cursor.username
+          }
 
+          editor.layoutContentWidget(widget)
+        }
+      },
           editor.layoutContentWidget(widget)
         }
       },
@@ -224,10 +307,20 @@ function App() {
         if (!editor) {
           return
         }
+        if (!editor) {
+          return
+        }
 
         const decoration =
           remoteCursorsRef.current.get(clientId)
+        const decoration =
+          remoteCursorsRef.current.get(clientId)
 
+        if (decoration) {
+          editor.deltaDecorations(
+            [decoration],
+            []
+          )
         if (decoration) {
           editor.deltaDecorations(
             [decoration],
@@ -238,7 +331,15 @@ function App() {
             clientId
           )
         }
+          remoteCursorsRef.current.delete(
+            clientId
+          )
+        }
 
+        const widget =
+          remoteCursorWidgetsRef.current.get(
+            clientId
+          )
         const widget =
           remoteCursorWidgetsRef.current.get(
             clientId
@@ -246,12 +347,22 @@ function App() {
 
         if (widget) {
           editor.removeContentWidget(widget)
+        if (widget) {
+          editor.removeContentWidget(widget)
 
           remoteCursorWidgetsRef.current.delete(
             clientId
           )
         }
+          remoteCursorWidgetsRef.current.delete(
+            clientId
+          )
+        }
 
+        const selection =
+          remoteSelectionsRef.current.get(
+            clientId
+          )
         const selection =
           remoteSelectionsRef.current.get(
             clientId
@@ -262,7 +373,17 @@ function App() {
             [selection],
             []
           )
+        if (selection) {
+          editor.deltaDecorations(
+            [selection],
+            []
+          )
 
+          remoteSelectionsRef.current.delete(
+            clientId
+          )
+        }
+      },
           remoteSelectionsRef.current.delete(
             clientId
           )
@@ -278,13 +399,21 @@ function App() {
         }
 
         const editor = editorRef.current
+        const editor = editorRef.current
 
+        if (!editor) {
+          return
+        }
         if (!editor) {
           return
         }
 
         const model = editor.getModel()
+        const model = editor.getModel()
 
+        if (!model) {
+          return
+        }
         if (!model) {
           return
         }
@@ -297,7 +426,16 @@ function App() {
           remoteSelectionsRef.current.get(
             clientId
           )
+        const oldDecoration =
+          remoteSelectionsRef.current.get(
+            clientId
+          )
 
+        if (oldDecoration) {
+          editor.deltaDecorations(
+            [oldDecoration],
+            []
+          )
         if (oldDecoration) {
           editor.deltaDecorations(
             [oldDecoration],
@@ -308,7 +446,14 @@ function App() {
             clientId
           )
         }
+          remoteSelectionsRef.current.delete(
+            clientId
+          )
+        }
 
+        if (!remoteSelection) {
+          return
+        }
         if (!remoteSelection) {
           return
         }
@@ -373,6 +518,11 @@ function App() {
           decorations[0]
         )
       },
+        remoteSelectionsRef.current.set(
+          clientId,
+          decorations[0]
+        )
+      },
 
       (state) => {
         setConnectionState(state)
@@ -384,12 +534,14 @@ function App() {
     )
 
     providerRef.current = provider
+    providerRef.current = provider
 
     return () => {
       provider.disconnect()
 
       providerRef.current = null
 
+      const editor = editorRef.current
       const editor = editorRef.current
 
       if (editor) {
@@ -406,6 +558,7 @@ function App() {
           const widget of
           remoteCursorWidgetsRef.current.values()
         ) {
+          editor.removeContentWidget(widget)
           editor.removeContentWidget(widget)
         }
 
@@ -437,11 +590,14 @@ function App() {
 
       if (
         typeof sharedLanguage === "string"
+        typeof sharedLanguage === "string"
       ) {
+        setLanguage(sharedLanguage)
         setLanguage(sharedLanguage)
       }
     }
 
+    if (!ymetadata.has("language")) {
     if (!ymetadata.has("language")) {
       ymetadata.set(
         "language",
@@ -467,10 +623,12 @@ function App() {
       setConnectionTimedOut(false)
 
       if (connectionTimeoutRef.current) {
+      if (connectionTimeoutRef.current) {
         clearTimeout(
           connectionTimeoutRef.current
         )
 
+        connectionTimeoutRef.current = null
         connectionTimeoutRef.current = null
       }
 
@@ -488,10 +646,12 @@ function App() {
 
     return () => {
       if (connectionTimeoutRef.current) {
+      if (connectionTimeoutRef.current) {
         clearTimeout(
           connectionTimeoutRef.current
         )
 
+        connectionTimeoutRef.current = null
         connectionTimeoutRef.current = null
       }
     }
@@ -507,10 +667,12 @@ function App() {
     setConnectionTimedOut(false)
 
     if (connectionTimeoutRef.current) {
+    if (connectionTimeoutRef.current) {
       clearTimeout(
         connectionTimeoutRef.current
       )
 
+      connectionTimeoutRef.current = null
       connectionTimeoutRef.current = null
     }
   }, [connectionState])
@@ -519,7 +681,13 @@ function App() {
     if (!terminalOpen) {
       return
     }
+    if (!terminalOpen) {
+      return
+    }
 
+    if (!terminalContainerRef.current) {
+      return
+    }
     if (!terminalContainerRef.current) {
       return
     }
@@ -528,12 +696,28 @@ function App() {
       terminalRef.current.open(
         terminalContainerRef.current
       )
+    if (terminalRef.current) {
+      terminalRef.current.open(
+        terminalContainerRef.current
+      )
 
+      terminalRef.current.focus()
       terminalRef.current.focus()
 
       return
     }
+      return
+    }
 
+    const terminal = new Terminal({
+      cursorBlink: true,
+      fontSize: 14,
+      convertEol: true,
+      theme: {
+        background: "#171717",
+        foreground: "#d4d4d4"
+      }
+    })
     const terminal = new Terminal({
       cursorBlink: true,
       fontSize: 14,
@@ -548,6 +732,10 @@ function App() {
       terminalContainerRef.current
     )
 
+    const protocol =
+      window.location.protocol === "https:"
+        ? "wss:"
+        : "ws:"
     const protocol =
       window.location.protocol === "https:"
         ? "wss:"
@@ -582,7 +770,16 @@ function App() {
         "Terminal WebSocket error",
         error
       )
+    socket.onerror = (error) => {
+      console.error(
+        "Terminal WebSocket error",
+        error
+      )
 
+      terminal.write(
+        "\r\n[Terminal connection error]\r\n"
+      )
+    }
       terminal.write(
         "\r\n[Terminal connection error]\r\n"
       )
@@ -616,6 +813,8 @@ function App() {
 
           return
         }
+          return
+        }
 
         if (data === "\u007F") {
           if (command.length > 0) {
@@ -631,6 +830,8 @@ function App() {
 
           return
         }
+          return
+        }
 
         if (
           data >= " " &&
@@ -642,6 +843,7 @@ function App() {
       }
     )
 
+    terminalRef.current = terminal
     terminalRef.current = terminal
 
     return () => {
@@ -664,6 +866,7 @@ function App() {
   }, [terminalOpen])
 
   const handleMount = (editor) => {
+    editorRef.current = editor
     editorRef.current = editor
 
     new MonacoBinding(
@@ -721,6 +924,7 @@ function App() {
     setJoinLoading(true)
 
     const form = event.currentTarget
+    const form = event.currentTarget
 
     const name =
       form.elements.username.value.trim()
@@ -729,8 +933,7 @@ function App() {
       form.elements.room?.value.trim()
 
     const roomId =
-      roomInput ||
-      room.trim()
+      roomInput || room.trim()
 
     if (!name) {
       setJoinError(
@@ -766,6 +969,7 @@ function App() {
 
       if (!response.ok) {
         if (response.status === 404) {
+        if (response.status === 404) {
           setJoinError(
             "Room not found. Check the room ID and try again."
           )
@@ -789,6 +993,8 @@ function App() {
           window.location.search
         )
 
+      params.set("room", roomId)
+      params.set("username", name)
       params.set("room", roomId)
       params.set("username", name)
 
@@ -820,6 +1026,7 @@ function App() {
     setCreateLoading(true)
 
     const form = event.currentTarget
+    const form = event.currentTarget
 
     const name =
       form.elements.username.value.trim()
@@ -834,6 +1041,12 @@ function App() {
     }
 
     try {
+      const response = await fetch(
+        "http://localhost:8080/api/rooms",
+        {
+          method: "POST"
+        }
+      )
       const response = await fetch(
         "http://localhost:8080/api/rooms",
         {
@@ -1359,9 +1572,7 @@ function App() {
                   </div>
 
                   <div
-                    ref={
-                      terminalContainerRef
-                    }
+                    ref={terminalContainerRef}
                     className="flex-1 min-h-0 p-2"
                   />
                 </div>
