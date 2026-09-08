@@ -15,6 +15,8 @@ function App() {
 
   const terminalRef = useRef(null)
   const terminalContainerRef = useRef(null)
+  const terminalSocketRef = useRef(null)
+  const terminalResizeObserverRef = useRef(null)
 
   const connectionTimeoutRef = useRef(null)
 
@@ -24,7 +26,9 @@ function App() {
 
   const [username, setUsername] = useState(() => {
     return (
-      new URLSearchParams(window.location.search).get("username") || ""
+      new URLSearchParams(
+        window.location.search
+      ).get("username") || ""
     )
   })
 
@@ -32,7 +36,9 @@ function App() {
 
   const [room, setRoom] = useState(() => {
     return (
-      new URLSearchParams(window.location.search).get("room") || ""
+      new URLSearchParams(
+        window.location.search
+      ).get("room") || ""
     )
   })
 
@@ -51,9 +57,17 @@ function App() {
   const [terminalOpen, setTerminalOpen] =
     useState(false)
 
+  const [terminalHeight, setTerminalHeight] =
+    useState(260)
+
+  const [terminalMaximized, setTerminalMaximized] =
+    useState(false)
+
   const [joined, setJoined] = useState(() => {
     const params =
-      new URLSearchParams(window.location.search)
+      new URLSearchParams(
+        window.location.search
+      )
 
     return Boolean(
       params.get("room") &&
@@ -92,7 +106,7 @@ function App() {
   )
 
   /*
-   * Creates the WebSocket provider when the user joins a room.
+   * Creates the WebSocket provider when the user joins.
    */
   useEffect(() => {
     if (!joined) {
@@ -520,19 +534,20 @@ function App() {
    * Shared language metadata.
    */
   useEffect(() => {
-    const handleLanguageChange = () => {
-      const sharedLanguage =
-        ymetadata.get("language")
+    const handleLanguageChange =
+      () => {
+        const sharedLanguage =
+          ymetadata.get("language")
 
-      if (
-        typeof sharedLanguage ===
-        "string"
-      ) {
-        setLanguage(
-          sharedLanguage
-        )
+        if (
+          typeof sharedLanguage ===
+          "string"
+        ) {
+          setLanguage(
+            sharedLanguage
+          )
+        }
       }
-    }
 
     if (
       !ymetadata.has("language")
@@ -602,7 +617,7 @@ function App() {
   }, [joined])
 
   /*
-   * Stop the connection timeout once connected.
+   * Stop timeout once connected.
    */
   useEffect(() => {
     if (
@@ -630,35 +645,52 @@ function App() {
    * Xterm terminal.
    */
   useEffect(() => {
-    if (!terminalOpen) {
+    if (
+      !terminalOpen ||
+      !terminalContainerRef.current
+    ) {
       return
     }
 
-    if (!terminalContainerRef.current) {
-      return
-    }
+    const terminal =
+      new Terminal({
+        cursorBlink: true,
+        fontSize: 14,
+        fontFamily:
+          "Consolas, 'Courier New', monospace",
+        convertEol: true,
 
-    const terminal = new Terminal({
-      cursorBlink: true,
-      fontSize: 14,
-      convertEol: true,
-      theme: {
-        background: "#171717",
-        foreground: "#d4d4d4"
-      }
-    })
+        theme: {
+          background: "#0a0a0a",
+          foreground: "#d4d4d4",
+          cursor: "#ffffff",
+          cursorAccent:
+            "#0a0a0a",
+          selectionBackground:
+            "#264f78"
+        },
+
+        scrollback: 5000,
+
+        allowTransparency: false
+      })
 
     terminal.open(
       terminalContainerRef.current
     )
 
+    terminalRef.current =
+      terminal
+
     const protocol =
-      window.location.protocol === "https:"
+      window.location.protocol ===
+      "https:"
         ? "wss:"
         : "ws:"
 
     const clientId =
-      providerRef.current?.clientId || ""
+      providerRef.current?.clientId ||
+      ""
 
     const socket =
       new WebSocket(
@@ -674,47 +706,53 @@ function App() {
     socket.binaryType =
       "arraybuffer"
 
+    terminalSocketRef.current =
+      socket
+
     socket.onopen = () => {
       console.log(
         "Terminal WebSocket connected"
       )
     }
 
-    socket.onmessage = (event) => {
-      if (
-        typeof event.data ===
-        "string"
-      ) {
-        terminal.write(
-          event.data
-        )
-        return
-      }
+    socket.onmessage =
+      (event) => {
+        if (
+          typeof event.data ===
+          "string"
+        ) {
+          terminal.write(
+            event.data
+          )
 
-      if (
-        event.data instanceof
-        ArrayBuffer
-      ) {
-        terminal.write(
-          new TextDecoder().decode(
-            new Uint8Array(
-              event.data
+          return
+        }
+
+        if (
+          event.data instanceof
+          ArrayBuffer
+        ) {
+          terminal.write(
+            new TextDecoder().decode(
+              new Uint8Array(
+                event.data
+              )
             )
           )
+        }
+      }
+
+    socket.onerror =
+      (error) => {
+        console.error(
+          "Terminal WebSocket error",
+          error
+        )
+
+        terminal.write(
+          "\r\n[Terminal connection error]\r\n"
         )
       }
-    }
-
-    socket.onerror = (error) => {
-      console.error(
-        "Terminal WebSocket error",
-        error
-      )
-
-      terminal.write(
-        "\r\n[Terminal connection error]\r\n"
-      )
-    }
 
     socket.onclose = () => {
       terminal.write(
@@ -725,86 +763,153 @@ function App() {
     let command = ""
 
     const dataDisposable =
-      terminal.onData((data) => {
-        if (
-          data === "\r" ||
-          data === "\n"
-        ) {
-          terminal.write(
-            "\r\n"
-          )
-
+      terminal.onData(
+        (data) => {
           if (
-            command.trim()
+            data === "\r" ||
+            data === "\n"
           ) {
+            terminal.write(
+              "\r\n"
+            )
+
             if (
-              socket.readyState ===
-              WebSocket.OPEN
+              command.trim()
             ) {
-              socket.send(
-                command
+              if (
+                socket.readyState ===
+                WebSocket.OPEN
+              ) {
+                socket.send(
+                  command
+                )
+              }
+            } else {
+              terminal.write(
+                "$ "
               )
             }
-          } else {
-            terminal.write(
-              "$ "
-            )
+
+            command = ""
+
+            return
           }
 
-          command = ""
-
-          return
-        }
-
-        if (
-          data === "\u007F"
-        ) {
           if (
-            command.length > 0
+            data === "\u007F"
           ) {
-            command =
-              command.slice(
-                0,
-                -1
-              )
+            if (
+              command.length > 0
+            ) {
+              command =
+                command.slice(
+                  0,
+                  -1
+                )
 
-            terminal.write(
-              "\b \b"
-            )
+              terminal.write(
+                "\b \b"
+              )
+            }
+
+            return
           }
 
+          if (
+            data === "\u0003"
+          ) {
+            command = ""
+
+            terminal.write(
+              "^C\r\n$ "
+            )
+
+            return
+          }
+
+          if (
+            data >= " " &&
+            data <= "~"
+          ) {
+            command += data
+
+            terminal.write(
+              data
+            )
+          }
+        }
+      )
+
+    const resizeTerminal =
+      () => {
+        const container =
+          terminalContainerRef.current
+
+        if (!container) {
           return
         }
 
+        const rect =
+          container.getBoundingClientRect()
+
         if (
-          data === "\u0003"
+          rect.width <= 0 ||
+          rect.height <= 0
         ) {
-          command = ""
-
-          terminal.write(
-            "^C\r\n$ "
-          )
-
           return
         }
 
-        if (
-          data >= " " &&
-          data <= "~"
-        ) {
-          command += data
+        const cellWidth = 8.4
+        const cellHeight = 17
 
-          terminal.write(
-            data
+        const cols =
+          Math.max(
+            2,
+            Math.floor(
+              rect.width /
+              cellWidth
+            )
           )
-        }
-      })
 
-    terminalRef.current =
-      terminal
+        const rows =
+          Math.max(
+            1,
+            Math.floor(
+              rect.height /
+              cellHeight
+            )
+          )
+
+        terminal.resize(
+          cols,
+          rows
+        )
+      }
+
+    terminalResizeObserverRef.current =
+      new ResizeObserver(
+        resizeTerminal
+      )
+
+    terminalResizeObserverRef.current.observe(
+      terminalContainerRef.current
+    )
+
+    requestAnimationFrame(
+      resizeTerminal
+    )
 
     return () => {
       dataDisposable.dispose()
+
+      if (
+        terminalResizeObserverRef.current
+      ) {
+        terminalResizeObserverRef.current.disconnect()
+
+        terminalResizeObserverRef.current =
+          null
+      }
 
       if (
         socket.readyState ===
@@ -814,6 +919,9 @@ function App() {
       ) {
         socket.close()
       }
+
+      terminalSocketRef.current =
+        null
 
       terminal.dispose()
 
@@ -834,383 +942,551 @@ function App() {
       terminalOpen &&
       terminalRef.current
     ) {
-      terminalRef.current.focus()
+      requestAnimationFrame(() => {
+        terminalRef.current?.focus()
+      })
     }
   }, [terminalOpen])
 
   /*
+   * Keep terminal sized correctly.
+   */
+  useEffect(() => {
+    if (
+      !terminalOpen ||
+      !terminalRef.current
+    ) {
+      return
+    }
+
+    const timer =
+      setTimeout(() => {
+        window.dispatchEvent(
+          new Event("resize")
+        )
+      }, 0)
+
+    return () => {
+      clearTimeout(timer)
+    }
+  }, [
+    terminalHeight,
+    terminalMaximized
+  ])
+
+  /*
+   * Terminal keyboard shortcuts.
+   */
+  useEffect(() => {
+    const handleKeyDown =
+      (event) => {
+        if (
+          event.ctrlKey &&
+          event.key === "`"
+        ) {
+          event.preventDefault()
+
+          setTerminalOpen(
+            (current) => !current
+          )
+        }
+      }
+
+    window.addEventListener(
+      "keydown",
+      handleKeyDown
+    )
+
+    return () => {
+      window.removeEventListener(
+        "keydown",
+        handleKeyDown
+      )
+    }
+  }, [])
+
+  /*
+   * Terminal resizing.
+   */
+  useEffect(() => {
+    if (
+      !terminalOpen ||
+      terminalMaximized
+    ) {
+      return
+    }
+
+    const handleResize =
+      (event) => {
+        const startY =
+          event.clientY
+
+        const startHeight =
+          terminalHeight
+
+        document.body.style.cursor =
+          "ns-resize"
+
+        document.body.style.userSelect =
+          "none"
+
+        const onMove =
+          (moveEvent) => {
+            const delta =
+              startY -
+              moveEvent.clientY
+
+            const maxHeight =
+              Math.floor(
+                window.innerHeight *
+                0.7
+              )
+
+            const nextHeight =
+              Math.max(
+                180,
+                Math.min(
+                  maxHeight,
+                  startHeight +
+                    delta
+                )
+              )
+
+            setTerminalHeight(
+              nextHeight
+            )
+          }
+
+        const onUp =
+          () => {
+            document.body.style.cursor =
+              ""
+
+            document.body.style.userSelect =
+              ""
+
+            window.removeEventListener(
+              "mousemove",
+              onMove
+            )
+
+            window.removeEventListener(
+              "mouseup",
+              onUp
+            )
+          }
+
+        window.addEventListener(
+          "mousemove",
+          onMove
+        )
+
+        window.addEventListener(
+          "mouseup",
+          onUp
+        )
+      }
+
+    const handle =
+      document.querySelector(
+        ".terminal-resize-handle"
+      )
+
+    if (!handle) {
+      return
+    }
+
+    handle.addEventListener(
+      "mousedown",
+      handleResize
+    )
+
+    return () => {
+      handle.removeEventListener(
+        "mousedown",
+        handleResize
+      )
+    }
+  }, [
+    terminalOpen,
+    terminalMaximized,
+    terminalHeight
+  ])
+
+  /*
    * Monaco editor setup.
    */
-  const handleMount = (editor) => {
-    editorRef.current =
-      editor
+  const handleMount =
+    (editor) => {
+      editorRef.current =
+        editor
 
-    new MonacoBinding(
-      yText,
-      editor.getModel(),
-      new Set([editor])
-    )
+      new MonacoBinding(
+        yText,
+        editor.getModel(),
+        new Set([editor])
+      )
 
-    /*
-     * Cursor tracking.
-     */
-    editor.onDidChangeCursorPosition(
-      (event) => {
-        const position =
-          event.position
+      editor.onDidChangeCursorPosition(
+        (event) => {
+          const position =
+            event.position
 
-        providerRef.current?.sendCursorPosition(
-          position.lineNumber,
-          position.column
-        )
-      }
-    )
+          providerRef.current?.sendCursorPosition(
+            position.lineNumber,
+            position.column
+          )
+        }
+      )
 
-    /*
-     * Selection tracking.
-     */
-    editor.onDidChangeCursorSelection(
-      (event) => {
-        const selection =
-          event.selection
+      editor.onDidChangeCursorSelection(
+        (event) => {
+          const selection =
+            event.selection
 
-        const hasSelection =
-          selection.startLineNumber !==
-            selection.endLineNumber ||
-          selection.startColumn !==
-            selection.endColumn
+          const hasSelection =
+            selection.startLineNumber !==
+              selection.endLineNumber ||
+            selection.startColumn !==
+              selection.endColumn
 
-        providerRef.current?.sendSelection(
-          hasSelection
-            ? {
-                startLineNumber:
-                  selection.startLineNumber,
+          providerRef.current?.sendSelection(
+            hasSelection
+              ? {
+                  startLineNumber:
+                    selection.startLineNumber,
 
-                startColumn:
-                  selection.startColumn,
+                  startColumn:
+                    selection.startColumn,
 
-                endLineNumber:
-                  selection.endLineNumber,
+                  endLineNumber:
+                    selection.endLineNumber,
 
-                endColumn:
-                  selection.endColumn
-              }
-            : null
-        )
-      }
-    )
-  }
+                  endColumn:
+                    selection.endColumn
+                }
+              : null
+          )
+        }
+      )
+    }
 
   /*
    * Join room.
    */
-  const handleJoin = async (event) => {
-    event.preventDefault()
+  const handleJoin =
+    async (event) => {
+      event.preventDefault()
 
-    setJoinError("")
-    setJoinLoading(true)
+      setJoinError("")
+      setJoinLoading(true)
 
-    const form =
-      event.currentTarget
+      const form =
+        event.currentTarget
 
-    const name =
-      form.elements.username.value.trim()
+      const name =
+        form.elements.username.value.trim()
 
-    const roomInput =
-      form.elements.room?.value.trim()
+      const roomInput =
+        form.elements.room?.value.trim()
 
-    const roomId =
-      roomInput ||
-      room.trim()
+      const roomId =
+        roomInput ||
+        room.trim()
 
-    if (!name) {
-      setJoinError(
-        "Please enter a username."
-      )
-
-      setJoinLoading(false)
-      return
-    }
-
-    if (!roomId) {
-      setJoinError(
-        "Please enter a room ID."
-      )
-
-      setJoinLoading(false)
-      return
-    }
-
-    try {
-      const response =
-        await fetch(
-          `http://localhost:8080/api/rooms/${encodeURIComponent(
-            roomId
-          )}`,
-          {
-            method: "GET",
-
-            headers: {
-              Accept:
-                "application/json, text/plain, */*"
-            }
-          }
+      if (!name) {
+        setJoinError(
+          "Please enter a username."
         )
 
-      if (!response.ok) {
-        if (
-          response.status ===
-          404
-        ) {
-          setJoinError(
-            "Room not found. Check the room ID and try again."
-          )
-        } else {
-          setJoinError(
-            "Unable to join the room. Please try again."
-          )
-        }
-
+        setJoinLoading(false)
         return
       }
 
-      setJoinError("")
-
-      setUsername(name)
-      setRoom(roomId)
-      setDocumentReady(false)
-      setJoined(true)
-
-      const params =
-        new URLSearchParams(
-          window.location.search
+      if (!roomId) {
+        setJoinError(
+          "Please enter a room ID."
         )
 
-      params.set(
-        "room",
-        roomId
-      )
+        setJoinLoading(false)
+        return
+      }
 
-      params.set(
-        "username",
-        name
-      )
+      try {
+        const response =
+          await fetch(
+            `http://localhost:8080/api/rooms/${encodeURIComponent(
+              roomId
+            )}`,
+            {
+              method: "GET",
+              headers: {
+                Accept:
+                  "application/json, text/plain, */*"
+              }
+            }
+          )
 
-      window.history.pushState(
-        {},
-        "",
-        `?${params.toString()}`
-      )
-    } catch (error) {
-      console.error(
-        "Failed to join room",
-        error
-      )
+        if (!response.ok) {
+          if (
+            response.status ===
+            404
+          ) {
+            setJoinError(
+              "Room not found. Check the room ID and try again."
+            )
+          } else {
+            setJoinError(
+              "Unable to join the room. Please try again."
+            )
+          }
 
-      setJoinError(
-        "Unable to connect to the server. Please try again."
-      )
-    } finally {
-      setJoinLoading(false)
+          return
+        }
+
+        setJoinError("")
+
+        setUsername(name)
+        setRoom(roomId)
+        setDocumentReady(false)
+        setJoined(true)
+
+        const params =
+          new URLSearchParams(
+            window.location.search
+          )
+
+        params.set(
+          "room",
+          roomId
+        )
+
+        params.set(
+          "username",
+          name
+        )
+
+        window.history.pushState(
+          {},
+          "",
+          `?${params.toString()}`
+        )
+      } catch (error) {
+        console.error(
+          "Failed to join room",
+          error
+        )
+
+        setJoinError(
+          "Unable to connect to the server. Please try again."
+        )
+      } finally {
+        setJoinLoading(false)
+      }
     }
-  }
 
   /*
    * Create room.
    */
-  const handleCreateRoom = async (
-    event
-  ) => {
-    event.preventDefault()
-
-    setCreateError("")
-    setCreateLoading(true)
-
-    const form =
-      event.currentTarget
-
-    const name =
-      form.elements.username.value.trim()
-
-    if (!name) {
-      setCreateError(
-        "Please enter a username."
-      )
-
-      setCreateLoading(false)
-      return
-    }
-
-    try {
-      const response =
-        await fetch(
-          "http://localhost:8080/api/rooms",
-          {
-            method: "POST"
-          }
-        )
-
-      if (!response.ok) {
-        throw new Error(
-          `Failed to create room: ${response.status}`
-        )
-      }
-
-      const roomId =
-        await response.text()
-
-      if (!roomId.trim()) {
-        throw new Error(
-          "Server returned an empty room ID"
-        )
-      }
-
-      const cleanRoomId =
-        roomId.trim()
+  const handleCreateRoom =
+    async (event) => {
+      event.preventDefault()
 
       setCreateError("")
+      setCreateLoading(true)
 
-      setUsername(name)
-      setRoom(cleanRoomId)
-      setDocumentReady(false)
-      setJoined(true)
+      const form =
+        event.currentTarget
 
-      const params =
-        new URLSearchParams(
-          window.location.search
+      const name =
+        form.elements.username.value.trim()
+
+      if (!name) {
+        setCreateError(
+          "Please enter a username."
         )
 
-      params.set(
-        "room",
-        cleanRoomId
-      )
+        setCreateLoading(false)
+        return
+      }
 
-      params.set(
-        "username",
-        name
-      )
+      try {
+        const response =
+          await fetch(
+            "http://localhost:8080/api/rooms",
+            {
+              method: "POST"
+            }
+          )
 
-      window.history.pushState(
-        {},
-        "",
-        `?${params.toString()}`
-      )
-    } catch (error) {
-      console.error(
-        "Failed to create room",
-        error
-      )
+        if (!response.ok) {
+          throw new Error(
+            `Failed to create room: ${response.status}`
+          )
+        }
 
-      setCreateError(
-        "Unable to create room. Please try again."
-      )
-    } finally {
-      setCreateLoading(false)
+        const roomId =
+          await response.text()
+
+        if (!roomId.trim()) {
+          throw new Error(
+            "Server returned an empty room ID"
+          )
+        }
+
+        const cleanRoomId =
+          roomId.trim()
+
+        setCreateError("")
+
+        setUsername(name)
+        setRoom(cleanRoomId)
+        setDocumentReady(false)
+        setJoined(true)
+
+        const params =
+          new URLSearchParams(
+            window.location.search
+          )
+
+        params.set(
+          "room",
+          cleanRoomId
+        )
+
+        params.set(
+          "username",
+          name
+        )
+
+        window.history.pushState(
+          {},
+          "",
+          `?${params.toString()}`
+        )
+      } catch (error) {
+        console.error(
+          "Failed to create room",
+          error
+        )
+
+        setCreateError(
+          "Unable to create room. Please try again."
+        )
+      } finally {
+        setCreateLoading(false)
+      }
     }
-  }
 
   /*
    * Share room.
    */
-  const handleShareRoom = async () => {
-    try {
-      await navigator.clipboard.writeText(
-        window.location.href
-      )
+  const handleShareRoom =
+    async () => {
+      try {
+        await navigator.clipboard.writeText(
+          window.location.href
+        )
 
-      setShareMessage(
-        "Room link copied"
-      )
+        setShareMessage(
+          "Room link copied"
+        )
 
-      setTimeout(() => {
-        setShareMessage("")
-      }, 2000)
-    } catch (error) {
-      console.error(
-        "Failed to copy room link",
-        error
-      )
+        setTimeout(() => {
+          setShareMessage("")
+        }, 2000)
+      } catch (error) {
+        console.error(
+          "Failed to copy room link",
+          error
+        )
 
-      setShareMessage(
-        "Failed to copy link"
-      )
+        setShareMessage(
+          "Failed to copy link"
+        )
+      }
     }
-  }
 
   /*
    * Leave room.
    */
-  const handleLeaveRoom = () => {
-    setJoined(false)
-    setUsername("")
-    setUsers([])
-    setShareMessage("")
-    setDocumentReady(false)
-    setJoinError("")
-    setCreateError("")
-    setTerminalOpen(false)
-    setRoom("")
+  const handleLeaveRoom =
+    () => {
+      setJoined(false)
+      setUsername("")
+      setUsers([])
+      setShareMessage("")
+      setDocumentReady(false)
+      setJoinError("")
+      setCreateError("")
+      setTerminalOpen(false)
+      setTerminalMaximized(false)
+      setRoom("")
 
-    window.history.pushState(
-      {},
-      "",
-      window.location.pathname
-    )
-  }
+      window.history.pushState(
+        {},
+        "",
+        window.location.pathname
+      )
+    }
 
   /*
    * Connection status display.
    */
-  const getConnectionStatus = () => {
-    switch (connectionState) {
-      case "CONNECTED":
-        return {
-          label: "Connected",
-          className:
-            "bg-green-500/15 text-green-400"
-        }
+  const getConnectionStatus =
+    () => {
+      switch (
+        connectionState
+      ) {
+        case "CONNECTED":
+          return {
+            label:
+              "Connected",
+            className:
+              "bg-green-500/15 text-green-400"
+          }
 
-      case "CONNECTING":
-        return {
-          label:
-            connectionTimedOut
-              ? "Connection unavailable"
-              : "Connecting...",
+        case "CONNECTING":
+          return {
+            label:
+              connectionTimedOut
+                ? "Connection unavailable"
+                : "Connecting...",
+            className:
+              connectionTimedOut
+                ? "bg-red-500/15 text-red-400"
+                : "bg-yellow-500/15 text-yellow-400"
+          }
 
-          className:
-            connectionTimedOut
-              ? "bg-red-500/15 text-red-400"
-              : "bg-yellow-500/15 text-yellow-400"
-        }
+        case "RECONNECTING":
+          return {
+            label:
+              connectionTimedOut
+                ? "Connection unavailable"
+                : "Reconnecting...",
+            className:
+              connectionTimedOut
+                ? "bg-red-500/15 text-red-400"
+                : "bg-yellow-500/15 text-yellow-400"
+          }
 
-      case "RECONNECTING":
-        return {
-          label:
-            connectionTimedOut
-              ? "Connection unavailable"
-              : "Reconnecting...",
+        case "DISCONNECTED":
+          return {
+            label:
+              "Disconnected",
+            className:
+              "bg-red-500/15 text-red-400"
+          }
 
-          className:
-            connectionTimedOut
-              ? "bg-red-500/15 text-red-400"
-              : "bg-yellow-500/15 text-yellow-400"
-        }
-
-      case "DISCONNECTED":
-        return {
-          label: "Disconnected",
-          className:
-            "bg-red-500/15 text-red-400"
-        }
-
-      default:
-        return {
-          label: connectionState,
-          className:
-            "bg-gray-800 text-gray-400"
-        }
+        default:
+          return {
+            label:
+              connectionState,
+            className:
+              "bg-gray-800 text-gray-400"
+          }
+      }
     }
-  }
 
   /*
    * Join/create screen.
@@ -1404,7 +1680,8 @@ function App() {
             type="button"
             onClick={() =>
               setTerminalOpen(
-                (current) => !current
+                (current) =>
+                  !current
               )
             }
             className="px-3 py-1 rounded bg-gray-800 text-white text-sm hover:bg-gray-700"
@@ -1416,7 +1693,9 @@ function App() {
 
           <button
             type="button"
-            onClick={handleLeaveRoom}
+            onClick={
+              handleLeaveRoom
+            }
             className="px-3 py-1 rounded bg-red-500 text-white text-sm hover:bg-red-600"
           >
             Leave
@@ -1443,7 +1722,9 @@ function App() {
             {users.map(
               (user) => (
                 <li
-                  key={user.clientId}
+                  key={
+                    user.clientId
+                  }
                   className="p-2 bg-gray-800 text-white rounded mb-2 flex items-center gap-2"
                 >
                   <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
@@ -1574,44 +1855,112 @@ function App() {
 
               </div>
 
-              <div className="flex-1 min-h-0">
+              <div
+                className={
+                  terminalOpen
+                    ? "min-h-0 flex-1"
+                    : "flex-1 min-h-0"
+                }
+              >
                 <Editor
                   height="100%"
-                  language={language}
+                  language={
+                    language
+                  }
                   defaultValue=""
                   theme="vs-dark"
-                  onMount={handleMount}
+                  onMount={
+                    handleMount
+                  }
+                  options={{
+                    automaticLayout:
+                      true,
+                    minimap: {
+                      enabled: true
+                    },
+                    scrollBeyondLastLine:
+                      false,
+                    fontSize: 14,
+                    padding: {
+                      top: 8
+                    }
+                  }}
                 />
               </div>
 
               {terminalOpen && (
-                <div className="h-64 shrink-0 border-t border-gray-700 bg-neutral-900 flex flex-col">
+                <div
+                  className="terminal-panel"
+                  style={{
+                    height:
+                      terminalMaximized
+                        ? "70%"
+                        : `${terminalHeight}px`
+                  }}
+                >
+                  {!terminalMaximized && (
+                    <div
+                      className="terminal-resize-handle"
+                      title="Drag to resize terminal"
+                    />
+                  )}
 
-                  <div className="h-9 shrink-0 px-3 flex items-center justify-between border-b border-gray-700 text-sm text-gray-400">
+                  <div className="terminal-header">
 
-                    <span>
-                      TERMINAL
-                    </span>
+                    <div className="terminal-title">
+                      <span>
+                        TERMINAL
+                      </span>
+                    </div>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setTerminalOpen(false)
-                      }
-                      className="text-gray-500 hover:text-white"
-                    >
-                      ×
-                    </button>
+                    <div className="terminal-actions">
 
+                      <button
+                        type="button"
+                        className="terminal-action"
+                        title={
+                          terminalMaximized
+                            ? "Restore terminal"
+                            : "Maximize terminal"
+                        }
+                        onClick={() =>
+                          setTerminalMaximized(
+                            (current) =>
+                              !current
+                          )
+                        }
+                      >
+                        {terminalMaximized
+                          ? "▣"
+                          : "□"}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="terminal-action"
+                        title="Close terminal"
+                        onClick={() => {
+                          setTerminalOpen(
+                            false
+                          )
+
+                          setTerminalMaximized(
+                            false
+                          )
+                        }}
+                      >
+                        ×
+                      </button>
+
+                    </div>
                   </div>
 
                   <div
                     ref={
                       terminalContainerRef
                     }
-                    className="flex-1 min-h-0 p-2"
+                    className="terminal-container"
                   />
-
                 </div>
               )}
 
