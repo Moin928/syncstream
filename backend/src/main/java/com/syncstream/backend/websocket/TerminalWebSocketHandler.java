@@ -9,6 +9,7 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -36,13 +37,22 @@ public class TerminalWebSocketHandler
   ) throws Exception {
 
     String room =
-      getParameter(session, "room");
+      getQueryParameter(
+        session,
+        "room"
+      );
 
     String username =
-      getParameter(session, "username");
+      getQueryParameter(
+        session,
+        "username"
+      );
 
     String clientId =
-      getParameter(session, "clientId");
+      getQueryParameter(
+        session,
+        "clientId"
+      );
 
     if (
       room == null ||
@@ -79,14 +89,8 @@ public class TerminalWebSocketHandler
       clientId
     );
 
-    roomManager.addUser(
-      room,
-      clientId,
-      username
-    );
-
     logger.info(
-      "Terminal connected: {} user={} room={}",
+      "Terminal connected: {} user: {} room: {}",
       session.getId(),
       username,
       room
@@ -116,7 +120,10 @@ public class TerminalWebSocketHandler
       message.getPayload().trim();
 
     if (command.isEmpty()) {
-      send(session, "$ ");
+      send(
+        session,
+        "$ "
+      );
       return;
     }
 
@@ -150,6 +157,7 @@ public class TerminalWebSocketHandler
     switch (command) {
 
       case "help":
+
         send(
           session,
           "\r\nAvailable commands:\r\n"
@@ -160,51 +168,67 @@ public class TerminalWebSocketHandler
             + "  room     Show current room\r\n"
             + "  users    Show room users\r\n"
         );
+
         break;
 
       case "clear":
+
         send(
           session,
           "\u001B[2J\u001B[H"
         );
-        return;
+
+        break;
 
       case "whoami":
+
         send(
           session,
           "\r\n"
             + username
             + "\r\n"
         );
+
         break;
 
       case "room":
+
         send(
           session,
-          "\r\nRoom: "
+          "\r\n"
             + room
             + "\r\n"
         );
+
         break;
 
       case "users":
+
         sendUsers(
           session,
           room
         );
+
         break;
 
       default:
+
         if (
           command.startsWith("echo ")
         ) {
+
+          String text =
+            command.substring(5);
+
           send(
             session,
             "\r\n"
-              + command.substring(5)
+              + text
               + "\r\n"
           );
+
         } else {
+
           send(
             session,
             "\r\nCommand not found: "
@@ -212,6 +236,8 @@ public class TerminalWebSocketHandler
               + "\r\n"
           );
         }
+
+        break;
     }
 
     send(
@@ -228,23 +254,33 @@ public class TerminalWebSocketHandler
     Map<String, String> users =
       roomManager.getRoomUsers(room);
 
-    StringBuilder output =
-      new StringBuilder(
-        "\r\nUsers in room:\r\n"
+    if (
+      users == null ||
+        users.isEmpty()
+    ) {
+
+      send(
+        session,
+        "\r\nNo users connected.\r\n"
       );
 
-    if (users.isEmpty()) {
-      output.append(
-        "  No users\r\n"
+      return;
+    }
+
+    StringBuilder output =
+      new StringBuilder(
+        "\r\nConnected users:\r\n"
       );
-    } else {
-      users.forEach(
-        (clientId, username) ->
-          output
-            .append("  ")
-            .append(username)
-            .append("\r\n")
-      );
+
+    for (
+      String username :
+      users.values()
+    ) {
+
+      output
+        .append("  ")
+        .append(username)
+        .append("\r\n");
     }
 
     send(
@@ -253,17 +289,44 @@ public class TerminalWebSocketHandler
     );
   }
 
-  private String getParameter(
+  private String getQueryParameter(
     WebSocketSession session,
-    String name
+    String parameter
   ) {
-    Object value =
-      session
-        .getAttributes()
-        .get(name);
 
-    if (value != null) {
-      return value.toString();
+    URI uri =
+      session.getUri();
+
+    if (
+      uri == null ||
+        uri.getRawQuery() == null
+    ) {
+      return null;
+    }
+
+    for (
+      String part :
+      uri.getRawQuery().split("&")
+    ) {
+
+      String[] keyValue =
+        part.split("=", 2);
+
+      if (
+        keyValue.length == 2 &&
+          parameter.equals(
+            URLDecoder.decode(
+              keyValue[0],
+              StandardCharsets.UTF_8
+            )
+          )
+      ) {
+
+        return URLDecoder.decode(
+          keyValue[1],
+          StandardCharsets.UTF_8
+        );
+      }
     }
 
     return null;
@@ -275,6 +338,7 @@ public class TerminalWebSocketHandler
   ) throws IOException {
 
     if (session.isOpen()) {
+
       session.sendMessage(
         new TextMessage(output)
       );
@@ -287,34 +351,10 @@ public class TerminalWebSocketHandler
     CloseStatus status
   ) {
 
-    String room =
-      (String) session
-        .getAttributes()
-        .get("room");
-
-    String clientId =
-      (String) session
-        .getAttributes()
-        .get("clientId");
-
-    if (
-      room != null &&
-        clientId != null &&
-        roomManager.isCurrentSession(
-          room,
-          clientId,
-          session.getId()
-        )
-    ) {
-      roomManager.removeUser(
-        room,
-        clientId
-      );
-    }
-
     logger.info(
-      "Terminal disconnected: {}",
-      session.getId()
+      "Terminal disconnected: {} status={}",
+      session.getId(),
+      status
     );
   }
 }
