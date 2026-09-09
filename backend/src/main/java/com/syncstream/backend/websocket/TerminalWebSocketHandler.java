@@ -7,12 +7,12 @@ import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
+import com.syncstream.backend.services.TerminalExecutionService;
 
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
 
 @Component
 public class TerminalWebSocketHandler
@@ -25,10 +25,23 @@ public class TerminalWebSocketHandler
 
   private final WebSocketRoomManager roomManager;
 
+  private final TerminalSessionManager sessionManager;
+
+  private final TerminalExecutionService executionService;
+
   public TerminalWebSocketHandler(
-    WebSocketRoomManager roomManager
+    WebSocketRoomManager roomManager,
+    TerminalSessionManager sessionManager,
+    TerminalExecutionService executionService
   ) {
-    this.roomManager = roomManager;
+    this.roomManager =
+      roomManager;
+
+    this.sessionManager =
+      sessionManager;
+
+    this.executionService =
+      executionService;
   }
 
   @Override
@@ -89,9 +102,21 @@ public class TerminalWebSocketHandler
       clientId
     );
 
+    /*
+     * Create an isolated terminal session
+     * for this client.
+     */
+    sessionManager.createSession(
+      clientId,
+      room,
+      username,
+      session
+    );
+
     logger.info(
-      "Terminal connected: {} user: {} room: {}",
+      "Terminal connected: session={} clientId={} user={} room={}",
       session.getId(),
+      clientId,
       username,
       room
     );
@@ -119,22 +144,150 @@ public class TerminalWebSocketHandler
     String command =
       message.getPayload().trim();
 
+    String clientId =
+      (String) session
+        .getAttributes()
+        .get("clientId");
+
+    if (
+      clientId == null ||
+        !sessionManager.hasSession(
+          clientId
+        )
+    ) {
+      send(
+        session,
+        "\r\nTerminal session unavailable.\r\n"
+      );
+
+      return;
+    }
+
     if (command.isEmpty()) {
       send(
         session,
         "$ "
       );
+
       return;
     }
 
     logger.info(
-      "Terminal command from {}: {}",
-      session.getId(),
+      "Terminal command from clientId={}: {}",
+      clientId,
       command
     );
 
-    handleCommand(
-      session,
+    /*
+     * Commands that don't need an OS process.
+     */
+    switch (command) {
+
+      case "help":
+
+        send(
+          session,
+          "\r\nAvailable commands:\r\n"
+            + "  help     Show available commands\r\n"
+            + "  clear    Clear the terminal\r\n"
+            + "  echo     Echo text\r\n"
+            + "  whoami   Show current user\r\n"
+            + "  room     Show current room\r\n"
+            + "  users    Show room users\r\n"
+            + "\r\n"
+        );
+
+        send(
+          session,
+          "$ "
+        );
+
+        return;
+
+      case "clear":
+
+        send(
+          session,
+          "\u001B[2J\u001B[H"
+        );
+
+        send(
+          session,
+          "$ "
+        );
+
+        return;
+
+      case "whoami":
+
+        send(
+          session,
+          "\r\n"
+            + session
+            .getAttributes()
+            .get("username")
+            + "\r\n"
+        );
+
+        send(
+          session,
+          "$ "
+        );
+
+        return;
+
+      case "room":
+
+        send(
+          session,
+          "\r\n"
+            + session
+            .getAttributes()
+            .get("room")
+            + "\r\n"
+        );
+
+        send(
+          session,
+          "$ "
+        );
+
+        return;
+
+      case "users":
+
+        sendUsers(
+          session,
+          (String) session
+            .getAttributes()
+            .get("room")
+        );
+
+        send(
+          session,
+          "$ "
+        );
+
+        return;
+    }
+
+    /*
+     * Everything else goes to the
+     * actual process execution service.
+     */
+    if (
+      command.startsWith("echo ")
+    ) {
+      executionService.execute(
+        clientId,
+        command
+      );
+
+      return;
+    }
+
+    executionService.execute(
+      clientId,
       command
     );
   }
@@ -251,14 +404,15 @@ public class TerminalWebSocketHandler
     String room
   ) throws IOException {
 
-    Map<String, String> users =
-      roomManager.getRoomUsers(room);
+    var users =
+      roomManager.getRoomUsers(
+        room
+      );
 
     if (
       users == null ||
         users.isEmpty()
     ) {
-
       send(
         session,
         "\r\nNo users connected.\r\n"
@@ -337,10 +491,13 @@ public class TerminalWebSocketHandler
     String output
   ) throws IOException {
 
-    if (session.isOpen()) {
-
+    if (
+      session.isOpen()
+    ) {
       session.sendMessage(
-        new TextMessage(output)
+        new TextMessage(
+          output
+        )
       );
     }
   }
@@ -351,9 +508,21 @@ public class TerminalWebSocketHandler
     CloseStatus status
   ) {
 
+    String clientId =
+      (String) session
+        .getAttributes()
+        .get("clientId");
+
+    if (clientId != null) {
+      sessionManager.removeSession(
+        clientId
+      );
+    }
+
     logger.info(
-      "Terminal disconnected: {} status={}",
+      "Terminal disconnected: session={} clientId={} status={}",
       session.getId(),
+      clientId,
       status
     );
   }
