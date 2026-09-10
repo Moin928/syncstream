@@ -6,7 +6,6 @@ services:
     restart: unless-stopped
 
     environment:
-      # uses the database password stored in the environment file
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
       MYSQL_DATABASE: syncstream
 
@@ -14,28 +13,49 @@ services:
       - "3307:3306"
 
     volumes:
-      # keeps mysql data available even when the container is recreated
       - syncstream-mysql-data:/var/lib/mysql
+
 
   backend:
     build:
       context: ./backend
+
     container_name: syncstream-backend
     restart: unless-stopped
 
     environment:
-      # passes the database password to the spring boot container
       DB_PASSWORD: ${DB_PASSWORD}
+
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/syncstream
 
     ports:
       - "8080:8080"
 
-    # starts mysql before the backend container
     depends_on:
       - mysql
+      - runner
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+
+  runner:
+    build:
+      context: ./backend/runner
+
+    container_name: syncstream-runner
+    restart: unless-stopped
+
+    command:
+      - sleep
+      - infinity
+
+    volumes:
+      - syncstream-runner-workspace:/workspace
+
 
 volumes:
 
-  # stores the mysql database data outside the container
   syncstream-mysql-data:
+
+  syncstream-runner-workspace:
