@@ -13,13 +13,11 @@ RUN apt-get update && \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Node.js + npm
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
     npm --version && \
     node --version
 
-# Create an unprivileged execution user
 RUN useradd \
     --create-home \
     --shell /bin/bash \
