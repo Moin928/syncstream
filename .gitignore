@@ -75,3 +75,4 @@ Desktop.ini
 # Keep these ignored unless you intentionally want
 # database dumps committed to Git.
 *.sql
+.idea/
