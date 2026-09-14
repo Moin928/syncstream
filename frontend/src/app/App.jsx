@@ -820,8 +820,15 @@ function App() {
           ) {
             command = ""
 
+            if (
+              socket.readyState ===
+              WebSocket.OPEN
+            ) {
+              socket.send("\u0003")
+            }
+
             terminal.write(
-              "^C\r\n$ "
+              "^C\r\n"
             )
 
             return
