@@ -172,6 +172,15 @@ public class TerminalWebSocketHandler
       return;
     }
 
+    if (command.equals("\u0003")) {
+
+      executionService.interrupt(
+        clientId
+      );
+
+      return;
+    }
+
     logger.info(
       "Terminal command from clientId={}: {}",
       clientId,
@@ -275,127 +284,9 @@ public class TerminalWebSocketHandler
      * Everything else goes to the
      * actual process execution service.
      */
-    if (
-      command.startsWith("echo ")
-    ) {
-      executionService.execute(
-        clientId,
-        command
-      );
-
-      return;
-    }
-
     executionService.execute(
       clientId,
       command
-    );
-  }
-
-  private void handleCommand(
-    WebSocketSession session,
-    String command
-  ) throws IOException {
-
-    String room =
-      (String) session
-        .getAttributes()
-        .get("room");
-
-    String username =
-      (String) session
-        .getAttributes()
-        .get("username");
-
-    switch (command) {
-
-      case "help":
-
-        send(
-          session,
-          "\r\nAvailable commands:\r\n"
-            + "  help     Show available commands\r\n"
-            + "  clear    Clear the terminal\r\n"
-            + "  echo     Echo text\r\n"
-            + "  whoami   Show current user\r\n"
-            + "  room     Show current room\r\n"
-            + "  users    Show room users\r\n"
-        );
-
-        break;
-
-      case "clear":
-
-        send(
-          session,
-          "\u001B[2J\u001B[H"
-        );
-
-        break;
-
-      case "whoami":
-
-        send(
-          session,
-          "\r\n"
-            + username
-            + "\r\n"
-        );
-
-        break;
-
-      case "room":
-
-        send(
-          session,
-          "\r\n"
-            + room
-            + "\r\n"
-        );
-
-        break;
-
-      case "users":
-
-        sendUsers(
-          session,
-          room
-        );
-
-        break;
-
-      default:
-
-        if (
-          command.startsWith("echo ")
-        ) {
-
-          String text =
-            command.substring(5);
-
-          send(
-            session,
-            "\r\n"
-              + text
-              + "\r\n"
-          );
-
-        } else {
-
-          send(
-            session,
-            "\r\nCommand not found: "
-              + command
-              + "\r\n"
-          );
-        }
-
-        break;
-    }
-
-    send(
-      session,
-      "$ "
     );
   }
 
