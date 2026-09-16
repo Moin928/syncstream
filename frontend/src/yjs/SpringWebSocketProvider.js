@@ -41,6 +41,11 @@ export class SpringWebSocketProvider {
     this.reconnectTimer = null
     this.reconnectAttempt = 0
 
+    /** Heartbeat interval — sends a ping every 25 s */
+    this.heartbeatTimer = null
+    /** Watchdog — forces reconnect if no message arrives within 35 s */
+    this.watchdogTimer = null
+
     /*
      * handles every local Yjs change.
      *
@@ -144,8 +149,11 @@ export class SpringWebSocketProvider {
       )
 
       this.sendJoin()
-
       this.requestSync()
+
+      // Start heartbeat and watchdog once connected
+      this.startHeartbeat()
+      this.resetWatchdog()
     }
 
     socket.onmessage = (
@@ -156,6 +164,9 @@ export class SpringWebSocketProvider {
       ) {
         return
       }
+
+      // Any incoming message resets the liveness watchdog
+      this.resetWatchdog()
 
       this.handleMessage(event)
     }
@@ -181,6 +192,8 @@ export class SpringWebSocketProvider {
         return
       }
 
+      this.stopHeartbeat()
+
       /*
        * intentional disconnects should not start the reconnect
        * process again.
@@ -196,6 +209,58 @@ export class SpringWebSocketProvider {
       )
 
       this.scheduleReconnect()
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Heartbeat helpers
+  // --------------------------------------------------------------------------
+
+  /**
+   * Sends a binary ping byte (0xFF) every 25 s so the server and any
+   * intermediate proxies keep the connection alive.
+   */
+  startHeartbeat() {
+    this.stopHeartbeat()
+    this.heartbeatTimer = setInterval(() => {
+      if (
+        this.socket &&
+        this.socket.readyState === WebSocket.OPEN
+      ) {
+        const ping = new Uint8Array([0xFF])
+        this.socket.send(ping)
+      }
+    }, 25_000)
+  }
+
+  /**
+   * Resets the watchdog timer.  If no message arrives within 35 s the
+   * socket is considered stale and we force a reconnect.
+   */
+  resetWatchdog() {
+    if (this.watchdogTimer) {
+      clearTimeout(this.watchdogTimer)
+      this.watchdogTimer = null
+    }
+
+    this.watchdogTimer = setTimeout(() => {
+      if (this.intentionalDisconnect) return
+      console.warn("WebSocket watchdog: no message in 35 s — reconnecting")
+      if (this.socket) {
+        this.socket.close()
+      }
+    }, 35_000)
+  }
+
+  /** Cancels both the heartbeat interval and the watchdog timeout. */
+  stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
+    if (this.watchdogTimer) {
+      clearTimeout(this.watchdogTimer)
+      this.watchdogTimer = null
     }
   }
 
@@ -741,6 +806,9 @@ export class SpringWebSocketProvider {
       this.reconnectTimer =
         null
     }
+
+    // Stop heartbeat and watchdog so no timers outlive this provider
+    this.stopHeartbeat()
 
     this.ydoc.off(
       "update",
