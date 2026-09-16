@@ -12,6 +12,13 @@ services:
     ports:
       - "3307:3306"
 
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$${DB_PASSWORD}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
     volumes:
       - syncstream-mysql-data:/var/lib/mysql
 
@@ -32,8 +39,10 @@ services:
       - "8080:8080"
 
     depends_on:
-      - mysql
-      - runner
+      mysql:
+        condition: service_healthy
+      runner:
+        condition: service_started
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -45,6 +54,16 @@ services:
 
     container_name: syncstream-runner
     restart: unless-stopped
+
+    security_opt:
+      - no-new-privileges:true
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 512M
+          pids: 100
 
     command:
       - sleep
