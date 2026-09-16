@@ -41,9 +41,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
               terminalWebSocketHandler,
               "/ws/terminal"
           )
-          .setAllowedOrigins(
-              "http://localhost:5173"
-          );
+          .setAllowedOrigins("*");
   }
 
   @Bean
@@ -52,13 +50,17 @@ public class WebSocketConfig implements WebSocketConfigurer {
     ServletServerContainerFactoryBean container =
       new ServletServerContainerFactoryBean();
 
+    // 10 MB — handles large code files and snapshot payloads
     container.setMaxBinaryMessageBufferSize(
-      5 * 1024 * 1024
+      10 * 1024 * 1024
     );
 
     container.setMaxTextMessageBufferSize(
-      5 * 1024 * 1024
+      10 * 1024 * 1024
     );
+
+    // 5 s async-send timeout prevents a slow client from blocking the sender thread
+    container.setAsyncSendTimeout(5_000L);
 
     return container;
   }
