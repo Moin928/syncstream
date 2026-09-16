@@ -8,13 +8,21 @@ RUN apt-get update && \
         git \
         python3 \
         python3-pip \
+        python3-venv \
         openjdk-21-jdk \
         build-essential \
         ca-certificates \
+        ruby-full \
+        php-cli \
+        golang-go \
+        rustc \
+        cargo \
+        sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
+    npm install -g tsx ts-node typescript && \
     npm --version && \
     node --version
 
