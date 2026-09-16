@@ -15,59 +15,12 @@ body,
 
 body {
   overflow: hidden;
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    Helvetica,
-    Arial,
-    sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background-color: #0d1117;
   color: #c9d1d9;
 }
 
-/* Monaco Customization */
-
-.monaco-editor,
-.monaco-editor .overflow-guard {
-  border-radius: 0;
-}
-
-.monaco-editor .margin {
-  background: #0d1117 !important;
-}
-
-/* Remote Cursor & Selection */
-
-.remote-cursor {
-  border-left: 2px solid #38bdf8;
-  margin-left: -1px;
-}
-
-.remote-cursor-label {
-  position: absolute;
-  padding: 2px 6px;
-  border-radius: 3px;
-  background: #38bdf8;
-  color: #0f172a;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 14px;
-  white-space: nowrap;
-  pointer-events: none;
-  transform: translateY(-100%);
-  margin-top: -2px;
-  z-index: 20;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-}
-
-.remote-selection {
-  background: rgba(56, 189, 248, 0.18);
-}
-
 /* Scrollbars */
-
 * {
   scrollbar-width: thin;
   scrollbar-color: #30363d #0d1117;
@@ -91,8 +44,43 @@ body {
   background: #484f58;
 }
 
-/* Inputs & Selects */
+/* Monaco Customization */
+.monaco-editor,
+.monaco-editor .overflow-guard {
+  border-radius: 0;
+}
 
+.monaco-editor .margin {
+  background: #0d1117 !important;
+}
+
+/* Remote Cursor & Selection */
+.remote-cursor {
+  border-left: 2px solid #38bdf8;
+  margin-left: -1px;
+}
+
+.remote-cursor-label {
+  position: absolute;
+  padding: 1px 5px;
+  border-radius: 2px 2px 2px 0;
+  background: #38bdf8;
+  color: #04101d;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 50;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  font-family: inherit;
+}
+
+.remote-selection {
+  background: rgba(56, 189, 248, 0.18);
+}
+
+/* Inputs & Selects */
 select {
   appearance: none;
   background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
@@ -102,8 +90,850 @@ select {
   padding-right: 26px !important;
 }
 
-/* Terminal & XTerm */
+/* ==========================================================================
+   VS Code Activity Bar (Far Left Rail)
+   ========================================================================== */
+.vscode-activity-bar {
+  width: 48px;
+  min-width: 48px;
+  background: #090d13;
+  border-right: 1px solid #21262d;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  user-select: none;
+  z-index: 10;
+}
 
+.activity-bar-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.activity-bar-btn {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #8b949e;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  font-size: 18px;
+}
+
+.activity-bar-btn:hover {
+  color: #f0f6fc;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.activity-bar-btn.active {
+  color: #f0f6fc;
+}
+
+.activity-bar-btn.active::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: #58a6ff;
+  border-radius: 0 2px 2px 0;
+}
+
+.activity-bar-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 0 4px;
+  min-width: 14px;
+  height: 14px;
+  background: #f85149;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+/* ==========================================================================
+   VS Code Primary Sidebar
+   ========================================================================== */
+.vscode-sidebar {
+  position: relative;
+  height: 100%;
+  background: #0d1117;
+  border-right: 1px solid #30363d;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 30;
+  transition: background-color 0.15s ease;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle.resizing {
+  background: #58a6ff;
+}
+
+.sidebar-title-header {
+  height: 35px;
+  min-height: 35px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-bottom: 1px solid #21262d;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8b949e;
+}
+
+.sidebar-action-icons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-icon-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  background: transparent;
+  border: none;
+  color: #8b949e;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.1s ease;
+}
+
+.sidebar-icon-btn:hover {
+  background: #21262d;
+  color: #c9d1d9;
+}
+
+.tree-section-header {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #8b949e;
+  background: #161b22;
+  border-top: 1px solid #21262d;
+  border-bottom: 1px solid #21262d;
+  cursor: pointer;
+}
+
+.tree-section-header:hover {
+  color: #c9d1d9;
+}
+
+.tree-container {
+  position: relative;
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.explorer-drop-zone {
+  position: absolute;
+  inset: 4px;
+  background: rgba(88, 166, 255, 0.1);
+  border: 2px dashed #58a6ff;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #58a6ff;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 30;
+  pointer-events: none;
+  backdrop-filter: blur(2px);
+}
+
+/* Tree Nodes (Folders and Files) */
+.tree-node {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: #c9d1d9;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background-color 0.1s ease;
+}
+
+.tree-node:hover {
+  background-color: #161b22;
+}
+
+.tree-node.active {
+  background-color: #21262d;
+  color: #58a6ff;
+  border-left-color: #58a6ff;
+  font-weight: 500;
+}
+
+.tree-node-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  truncate: true;
+  min-width: 0;
+  flex: 1;
+}
+
+.tree-node-actions {
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.tree-node:hover .tree-node-actions {
+  opacity: 1;
+}
+
+.tree-action-btn {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+  border: none;
+  background: transparent;
+  color: #8b949e;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.tree-action-btn:hover {
+  background: #30363d;
+  color: #f85149;
+}
+
+.tree-input-wrapper {
+  padding: 2px 8px;
+}
+
+.tree-inline-input {
+  width: 100%;
+  height: 22px;
+  padding: 0 6px;
+  background: #090d13;
+  border: 1px solid #58a6ff;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #f0f6fc;
+  outline: none;
+  font-family: Consolas, monospace;
+}
+
+/* ==========================================================================
+   In-Sidebar Search & Replace Panel (VS Code Style)
+   ========================================================================== */
+.sidebar-search-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #0d1117;
+  overflow: hidden;
+}
+
+.sidebar-search-inputs {
+  padding: 8px 10px;
+  border-bottom: 1px solid #21262d;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #11161d;
+}
+
+.search-input-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.search-drawer-toggle {
+  width: 18px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #8b949e;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.1s ease;
+}
+
+.search-drawer-toggle:hover {
+  background: #21262d;
+  color: #f0f6fc;
+}
+
+.search-input-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  position: relative;
+  background: #090d13;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  transition: border-color 0.15s ease;
+}
+
+.search-input-wrapper:focus-within {
+  border-color: #58a6ff;
+}
+
+.sidebar-search-input {
+  flex: 1;
+  width: 100%;
+  height: 26px;
+  padding: 0 65px 0 8px;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 12px;
+  color: #c9d1d9;
+  font-family: inherit;
+}
+
+.sidebar-search-input::placeholder {
+  color: #6e7681;
+}
+
+.search-option-toggles {
+  position: absolute;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.search-option-btn {
+  padding: 1px 4px;
+  height: 18px;
+  border-radius: 2px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #8b949e;
+  font-size: 10px;
+  font-family: Consolas, monospace;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.search-option-btn:hover {
+  background: #21262d;
+  color: #c9d1d9;
+}
+
+.search-option-btn.active {
+  background: rgba(56, 139, 253, 0.2);
+  border-color: #58a6ff;
+  color: #58a6ff;
+}
+
+.search-replace-all-btn {
+  padding: 0 8px;
+  height: 22px;
+  margin-right: 2px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  font-size: 11px;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.1s ease;
+}
+
+.search-replace-all-btn:hover:not(:disabled) {
+  background: #30363d;
+  color: #f0f6fc;
+  border-color: #58a6ff;
+}
+
+.search-replace-all-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sidebar-filter-input {
+  width: 100%;
+  height: 22px;
+  padding: 0 6px;
+  background: #090d13;
+  border: 1px solid #21262d;
+  border-radius: 3px;
+  font-size: 11px;
+  color: #c9d1d9;
+  outline: none;
+}
+
+.sidebar-filter-input:focus {
+  border-color: #58a6ff;
+}
+
+.search-status-bar {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: #8b949e;
+  background: #161b22;
+  border-bottom: 1px solid #21262d;
+}
+
+.search-results-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.search-file-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.search-file-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #c9d1d9;
+  transition: background 0.1s ease;
+  user-select: none;
+}
+
+.search-file-header:hover {
+  background: #161b22;
+}
+
+.search-file-name {
+  font-weight: 500;
+  color: #f0f6fc;
+}
+
+.search-count-badge {
+  padding: 0 6px;
+  height: 16px;
+  border-radius: 8px;
+  background: #21262d;
+  color: #8b949e;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+.search-inline-replace-btn {
+  padding: 1px 5px;
+  font-size: 10px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  border-radius: 3px;
+  cursor: pointer;
+  margin-right: 4px;
+  transition: all 0.1s ease;
+}
+
+.search-inline-replace-btn:hover {
+  background: #30363d;
+  color: #58a6ff;
+  border-color: #58a6ff;
+}
+
+.search-file-matches {
+  display: flex;
+  flex-direction: column;
+}
+
+.search-match-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px 3px 26px;
+  cursor: pointer;
+  font-size: 11.5px;
+  font-family: Consolas, "Courier New", monospace;
+  color: #8b949e;
+  transition: background 0.1s ease;
+}
+
+.search-match-item:hover {
+  background: #21262d;
+  color: #f0f6fc;
+}
+
+.search-match-line {
+  min-width: 22px;
+  color: #58a6ff;
+  font-weight: 600;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.search-match-preview {
+  flex: 1;
+  min-width: 0;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-match-highlight {
+  background: rgba(240, 136, 62, 0.35);
+  color: #f0883e;
+  font-weight: 700;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.search-single-replace-btn {
+  opacity: 0;
+  padding: 0 4px;
+  height: 18px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #8b949e;
+  border-radius: 2px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.search-match-item:hover .search-single-replace-btn {
+  opacity: 1;
+}
+
+.search-single-replace-btn:hover {
+  background: #30363d;
+  color: #58a6ff;
+  border-color: #58a6ff;
+}
+
+/* ==========================================================================
+   In-Sidebar Chat Panel (VS Code Style)
+   ========================================================================== */
+.sidebar-chat-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #0d1117;
+}
+
+.sidebar-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-chat-bubble {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.sidebar-chat-bubble.mine {
+  background: rgba(31, 111, 235, 0.15);
+  border: 1px solid rgba(56, 139, 253, 0.3);
+}
+
+.sidebar-chat-bubble.peer {
+  background: #161b22;
+  border: 1px solid #30363d;
+}
+
+.sidebar-chat-sender {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  font-size: 10px;
+  color: #8b949e;
+}
+
+.sidebar-chat-form {
+  padding: 8px;
+  border-top: 1px solid #21262d;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #161b22;
+}
+
+.sidebar-chat-input {
+  flex: 1;
+  padding: 6px 10px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #c9d1d9;
+  outline: none;
+}
+
+.sidebar-chat-input:focus {
+  border-color: #58a6ff;
+}
+
+.sidebar-chat-send {
+  padding: 6px 10px;
+  background: #1f6feb;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.sidebar-chat-send:hover {
+  background: #388bfd;
+}
+
+/* ==========================================================================
+   Editor Tabs Bar & Breadcrumbs
+   ========================================================================== */
+.editor-tabs-bar {
+  height: 35px;
+  min-height: 35px;
+  background: #090d13;
+  border-bottom: 1px solid #21262d;
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  user-select: none;
+}
+
+.editor-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 12px;
+  font-size: 12px;
+  color: #8b949e;
+  background: #090d13;
+  border-right: 1px solid #21262d;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  white-space: nowrap;
+}
+
+.editor-tab:hover {
+  background: #161b22;
+  color: #c9d1d9;
+}
+
+.editor-tab.active {
+  background: #0d1117;
+  color: #f0f6fc;
+  border-bottom-color: #58a6ff;
+  font-weight: 500;
+}
+
+.editor-tab-close {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  font-size: 10px;
+  color: #8b949e;
+  transition: all 0.1s ease;
+}
+
+.editor-tab-close:hover {
+  background: #30363d;
+  color: #f85149;
+}
+
+.editor-breadcrumbs {
+  height: 22px;
+  min-height: 22px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #8b949e;
+  background: #0d1117;
+  border-bottom: 1px solid #161b22;
+  user-select: none;
+}
+
+/* ==========================================================================
+   Live Web Preview Panel
+   ========================================================================== */
+.preview-split-container {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.preview-panel {
+  flex: 1;
+  min-width: 320px;
+  background: #090d13;
+  border-left: 1px solid #30363d;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.preview-header {
+  height: 35px;
+  min-height: 35px;
+  background: #161b22;
+  border-bottom: 1px solid #21262d;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  user-select: none;
+}
+
+.preview-device-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: #0d1117;
+  padding: 2px;
+  border-radius: 5px;
+  border: 1px solid #30363d;
+}
+
+.preview-device-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #8b949e;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.preview-device-btn:hover {
+  color: #c9d1d9;
+}
+
+.preview-device-btn.active {
+  background: #21262d;
+  color: #58a6ff;
+  font-weight: 600;
+}
+
+.preview-address-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #8b949e;
+  font-family: Consolas, monospace;
+}
+
+.preview-frame-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #05070a;
+  padding: 12px;
+  overflow: auto;
+}
+
+.preview-frame-wrapper {
+  height: 100%;
+  background: #ffffff;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.preview-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #ffffff;
+}
+
+/* ==========================================================================
+   Terminal & Bottom Dock Panel
+   ========================================================================== */
 .xterm {
   width: 100%;
   height: 100%;
@@ -121,12 +951,10 @@ select {
   background: rgba(56, 189, 248, 0.3) !important;
 }
 
-/* Bottom Panel Dock */
-
 .terminal-panel {
   position: relative;
   flex-shrink: 0;
-  min-height: 160px;
+  min-height: 180px;
   max-height: 80%;
   background: #090d13;
   border-top: 1px solid #30363d;
@@ -154,7 +982,7 @@ select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px 0 8px;
+  padding: 0 8px;
   border-bottom: 1px solid #21262d;
   background: #0d1117;
   user-select: none;
@@ -240,8 +1068,6 @@ select {
   padding: 6px 10px;
 }
 
-/* Problems Tab Panel */
-
 .problems-panel {
   flex: 1;
   min-height: 0;
@@ -270,13 +1096,12 @@ select {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-/* Output Tab Panel */
-
 .output-panel {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   background: #090d13;
+  border-top: 1px solid #21262d;
   padding: 10px 14px;
   font-family: Consolas, "Courier New", monospace;
   font-size: 12px;
@@ -285,8 +1110,6 @@ select {
   white-space: pre-wrap;
   word-break: break-all;
 }
-
-/* Status Bar */
 
 .editor-status-bar {
   height: 22px;
@@ -301,8 +1124,6 @@ select {
   color: #8b949e;
   user-select: none;
 }
-
-/* Primary Run Button */
 
 .btn-primary-run {
   display: inline-flex;
@@ -328,25 +1149,9 @@ select {
   cursor: not-allowed;
 }
 
-/* Compact Sidebar */
-
-.sidebar-user-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  color: #c9d1d9;
-  transition: background-color 0.1s ease;
-}
-
-.sidebar-user-item:hover {
-  background: #161b22;
-}
-
 @media (max-width: 768px) {
-  aside {
+  .vscode-activity-bar,
+  .vscode-sidebar {
     display: none;
   }
 }
