@@ -6,6 +6,7 @@ import { Terminal } from "@xterm/xterm"
 import { MonacoBinding } from "y-monaco"
 import { useRef, useMemo, useState, useEffect, useCallback } from "react"
 import * as Y from "yjs"
+import JSZip from "jszip"
 
 import { SpringWebSocketProvider } from "../yjs/SpringWebSocketProvider"
 import {
@@ -15,29 +16,289 @@ import {
   SEVERITY
 } from "../diagnostics"
 
-function getExecutionCommand(language, code) {
-  switch (language) {
-    case "java":
-      return `cat << 'EOF' > Main.java\n${code}\nEOF\njavac Main.java && java Main\n`
-    case "python":
-      return `cat << 'EOF' > main.py\n${code}\nEOF\npython3 main.py || python main.py\n`
-    case "cpp":
-      return `cat << 'EOF' > main.cpp\n${code}\nEOF\ng++ -O2 -std=c++17 main.cpp -o main && ./main\n`
-    case "c":
-      return `cat << 'EOF' > main.c\n${code}\nEOF\ngcc -O2 main.c -o main && ./main\n`
-    case "javascript":
-      return `cat << 'EOF' > index.js\n${code}\nEOF\nnode index.js\n`
-    case "typescript":
-      return `cat << 'EOF' > index.ts\n${code}\nEOF\nnpx -y tsx index.ts || node index.js\n`
-    case "go":
-      return `cat << 'EOF' > main.go\n${code}\nEOF\ngo run main.go\n`
-    case "rust":
-      return `cat << 'EOF' > main.rs\n${code}\nEOF\nrustc main.rs -o main && ./main\n`
-    case "sql":
-      return `cat << 'EOF' > query.sql\n${code}\nEOF\ncat query.sql\n`
-    default:
-      return `cat << 'EOF' > code.txt\n${code}\nEOF\ncat code.txt\n`
+function getLanguageFromFileName(filename) {
+  if (!filename) return "javascript"
+  const ext = filename.split(".").pop().toLowerCase()
+  switch (ext) {
+    case "py": return "python"
+    case "js": case "mjs": case "cjs": return "javascript"
+    case "ts": case "tsx": return "typescript"
+    case "java": return "java"
+    case "cpp": case "cc": case "cxx": case "hpp": case "h": return "cpp"
+    case "c": return "c"
+    case "go": return "go"
+    case "rs": return "rust"
+    case "cs": return "csharp"
+    case "rb": return "ruby"
+    case "php": return "php"
+    case "kt": case "kts": return "kotlin"
+    case "swift": return "swift"
+    case "html": case "htm": return "html"
+    case "css": return "css"
+    case "json": return "json"
+    case "sql": return "sql"
+    default: return "plaintext"
   }
+}
+
+function getFileNameForLanguage(language) {
+  switch (language?.toLowerCase()) {
+    case "python": return "main.py"
+    case "java": return "Main.java"
+    case "cpp": return "main.cpp"
+    case "c": return "main.c"
+    case "javascript": return "index.js"
+    case "typescript": return "index.ts"
+    case "go": return "main.go"
+    case "rust": return "main.rs"
+    case "csharp": return "Program.cs"
+    case "ruby": return "main.rb"
+    case "php": return "index.php"
+    case "kotlin": return "main.kt"
+    case "swift": return "main.swift"
+    case "sql": return "query.sql"
+    case "html": return "index.html"
+    case "css": return "style.css"
+    case "json": return "data.json"
+    default: return "main.txt"
+  }
+}
+
+function getFileIcon(filename) {
+  const lang = getLanguageFromFileName(filename)
+  const ext = filename?.split(".").pop()?.toLowerCase() || ""
+
+  let dotColor = "#8b949e"
+  let label = ext || "txt"
+
+  switch (lang) {
+    case "python":
+      dotColor = "#3572A5"
+      label = "py"
+      break
+    case "javascript":
+      dotColor = "#f1e05a"
+      label = "js"
+      break
+    case "typescript":
+      dotColor = "#3178c6"
+      label = "ts"
+      break
+    case "java":
+      dotColor = "#b07219"
+      label = "java"
+      break
+    case "cpp":
+    case "c":
+      dotColor = "#f34b7d"
+      label = ext || "c"
+      break
+    case "go":
+      dotColor = "#00ADD8"
+      label = "go"
+      break
+    case "rust":
+      dotColor = "#dea584"
+      label = "rs"
+      break
+    case "csharp":
+      dotColor = "#178600"
+      label = "cs"
+      break
+    case "ruby":
+      dotColor = "#701516"
+      label = "rb"
+      break
+    case "php":
+      dotColor = "#4F5D95"
+      label = "php"
+      break
+    case "kotlin":
+      dotColor = "#A97BFF"
+      label = "kt"
+      break
+    case "swift":
+      dotColor = "#F05138"
+      label = "swift"
+      break
+    case "html":
+      dotColor = "#e34c26"
+      label = "html"
+      break
+    case "css":
+      dotColor = "#563d7c"
+      label = "css"
+      break
+    case "json":
+      dotColor = "#cbcb41"
+      label = "json"
+      break
+    case "sql":
+      dotColor = "#e38c00"
+      label = "sql"
+      break
+    default:
+      dotColor = "#8b949e"
+      label = ext || "file"
+  }
+
+  return (
+    <span
+      className="inline-flex items-center justify-center min-w-[15px] h-3.5 px-0.5 rounded-[2px] text-[7.5px] font-bold font-mono uppercase tracking-tight leading-none flex-shrink-0"
+      style={{
+        backgroundColor: `${dotColor}20`,
+        color: dotColor,
+        border: `1px solid ${dotColor}40`
+      }}
+      title={lang}
+    >
+      {label.slice(0, 3)}
+    </span>
+  )
+}
+
+/**
+ * Builds a hierarchical tree structure from a flat list of file paths.
+ */
+function buildTreeFromPaths(filePaths) {
+  const root = { name: "root", path: "", isDirectory: true, children: {} }
+
+  for (const filePath of filePaths) {
+    const parts = filePath.split("/").filter(Boolean)
+    let current = root
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      const isLast = i === parts.length - 1
+      const currentPath = parts.slice(0, i + 1).join("/")
+
+      if (isLast) {
+        current.children[part] = {
+          name: part,
+          path: filePath,
+          isDirectory: false
+        }
+      } else {
+        if (!current.children[part]) {
+          current.children[part] = {
+            name: part,
+            path: currentPath,
+            isDirectory: true,
+            children: {}
+          }
+        }
+        current = current.children[part]
+      }
+    }
+  }
+
+  function convertToArray(node) {
+    if (!node.isDirectory) return node
+    const childrenArray = Object.values(node.children).map(convertToArray)
+    childrenArray.sort((a, b) => {
+      if (a.isDirectory === b.isDirectory) {
+        return a.name.localeCompare(b.name)
+      }
+      return a.isDirectory ? -1 : 1
+    })
+    return {
+      ...node,
+      children: childrenArray
+    }
+  }
+
+  return convertToArray(root).children || []
+}
+
+/**
+ * Bundles HTML, CSS, and JS workspace files into a self-contained document for iframe rendering.
+ */
+function generateWebPreviewBundle(files, activeFile) {
+  let html = files["index.html"] || ""
+  if (!html) {
+    if (activeFile && activeFile.endsWith(".html") && files[activeFile]) {
+      html = files[activeFile]
+    } else {
+      const htmlKey = Object.keys(files).find((k) => k.endsWith(".html"))
+      if (htmlKey) {
+        html = files[htmlKey]
+      } else {
+        html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>SyncStream Live Preview</title>
+</head>
+<body>
+  <div id="root"></div>
+</body>
+</html>`
+      }
+    }
+  }
+
+  let cssBundle = ""
+  for (const [fname, content] of Object.entries(files)) {
+    if (fname.endsWith(".css") && content.trim()) {
+      cssBundle += `\n/* ${fname} */\n${content}\n`
+    }
+  }
+
+  let jsBundle = ""
+  for (const [fname, content] of Object.entries(files)) {
+    if ((fname.endsWith(".js") || fname.endsWith(".ts")) && content.trim()) {
+      jsBundle += `\n// ${fname}\ntry {\n${content}\n} catch(err) { console.error(err); }\n`
+    }
+  }
+
+  const consoleScript = `
+<script>
+(function() {
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  function sendLog(level, args) {
+    try {
+      const msg = Array.from(args).map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+      window.parent.postMessage({ type: 'syncstream:preview_log', level, message: msg }, '*');
+    } catch(e) {}
+  }
+  console.log = function(...args) { sendLog('log', args); originalLog.apply(console, args); };
+  console.warn = function(...args) { sendLog('warn', args); originalWarn.apply(console, args); };
+  console.error = function(...args) { sendLog('error', args); originalError.apply(console, args); };
+  window.addEventListener('error', function(e) {
+    sendLog('error', [e.message + ' at line ' + e.lineno]);
+  });
+})();
+</script>`
+
+  let outputHtml = html
+
+  if (cssBundle) {
+    const styleTag = `<style>${cssBundle}</style>`
+    if (outputHtml.includes("</head>")) {
+      outputHtml = outputHtml.replace("</head>", styleTag + "\n</head>")
+    } else {
+      outputHtml = styleTag + outputHtml
+    }
+  }
+
+  if (outputHtml.includes("<head>")) {
+    outputHtml = outputHtml.replace("<head>", "<head>\n" + consoleScript)
+  } else {
+    outputHtml = consoleScript + outputHtml
+  }
+
+  if (jsBundle) {
+    const scriptTag = `<script>\n${jsBundle}\n</script>`
+    if (outputHtml.includes("</body>")) {
+      outputHtml = outputHtml.replace("</body>", scriptTag + "\n</body>")
+    } else {
+      outputHtml = outputHtml + scriptTag
+    }
+  }
+
+  return outputHtml
 }
 
 function App() {
@@ -49,9 +310,13 @@ function App() {
   const terminalContainerRef = useRef(null)
   const terminalSocketRef = useRef(null)
   const terminalResizeObserverRef = useRef(null)
+  const importFileInputRef = useRef(null)
 
   const connectionTimeoutRef = useRef(null)
   const validationTimerRef = useRef(null)
+  const previewTimerRef = useRef(null)
+  const monacoBindingRef = useRef(null)
+  const chatEndRef = useRef(null)
 
   const remoteCursorsRef = useRef(new Map())
   const remoteCursorWidgetsRef = useRef(new Map())
@@ -75,90 +340,146 @@ function App() {
     )
   })
 
-  const [connectionState, setConnectionState] =
-    useState("CONNECTING")
+  const [connectionState, setConnectionState] = useState("CONNECTING")
+  const [connectionTimedOut, setConnectionTimedOut] = useState(false)
+  const [documentReady, setDocumentReady] = useState(false)
 
-  const [connectionTimedOut, setConnectionTimedOut] =
-    useState(false)
+  const [language, setLanguage] = useState("javascript")
+  const [terminalOpen, setTerminalOpen] = useState(true)
+  const [activeBottomTab, setActiveBottomTab] = useState("terminal")
+  const [diagnostics, setDiagnostics] = useState([])
+  const [outputLogs, setOutputLogs] = useState("")
+  const [isRunning, setIsRunning] = useState(false)
+  const [cursorPos, setCursorPos] = useState({ lineNumber: 1, column: 1 })
+  const [terminalHeight, setTerminalHeight] = useState(240)
+  const [terminalMaximized, setTerminalMaximized] = useState(false)
 
-  const [documentReady, setDocumentReady] =
-    useState(false)
+  // VS Code Layout State
+  const [activeActivityTab, setActiveActivityTab] = useState("explorer")
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarWidth, setSidebarWidth] = useState(260)
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false)
+  const [isResizingTerminal, setIsResizingTerminal] = useState(false)
+  const [isDraggingOver, setIsDraggingOver] = useState(false)
 
-  const [language, setLanguage] =
-    useState("javascript")
+  // Multi-File Project State & Folders
+  const [fileList, setFileList] = useState(["main.js"])
+  const [activeFile, setActiveFile] = useState("main.js")
+  const [openTabs, setOpenTabs] = useState(["main.js"])
+  const [expandedFolders, setExpandedFolders] = useState(() => new Set(["src", "public", "styles"]))
+  const [isCreatingNode, setIsCreatingNode] = useState(null)
+  const [newPathInput, setNewPathInput] = useState("")
+  const [renamingNode, setRenamingNode] = useState(null)
+  const [renameInput, setRenameInput] = useState("")
 
-  const [terminalOpen, setTerminalOpen] =
-    useState(true)
+  // Live Web Preview State
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewDevice, setPreviewDevice] = useState("desktop")
+  const [previewKey, setPreviewKey] = useState(1)
+  const [previewSrcDoc, setPreviewSrcDoc] = useState("")
 
-  const [activeBottomTab, setActiveBottomTab] =
-    useState("terminal")
+  // In-Room Collaborative Chat State
+  const [chatMessages, setChatMessages] = useState([])
+  const [unreadChatCount, setUnreadChatCount] = useState(0)
+  const [chatInputText, setChatInputText] = useState("")
 
-  const [diagnostics, setDiagnostics] =
-    useState([])
-
-  const [outputLogs, setOutputLogs] =
-    useState("")
-
-  const [isRunning, setIsRunning] =
-    useState(false)
-
-  const [cursorPos, setCursorPos] =
-    useState({ lineNumber: 1, column: 1 })
-
-  const [terminalHeight, setTerminalHeight] =
-    useState(240)
-
-  const [terminalMaximized, setTerminalMaximized] =
-    useState(false)
+  // Global Project Search & Replace State (Ctrl+Shift+F)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [replaceQuery, setReplaceQuery] = useState("")
+  const [searchMatchCase, setSearchMatchCase] = useState(false)
+  const [searchUseRegex, setSearchUseRegex] = useState(false)
+  const [searchWholeWord, setSearchWholeWord] = useState(false)
+  const [searchIncludeFilter, setSearchIncludeFilter] = useState("")
+  const [searchExcludeFilter, setSearchExcludeFilter] = useState("")
+  const [showReplaceDrawer, setShowReplaceDrawer] = useState(true)
+  const [collapsedSearchFiles, setCollapsedSearchFiles] = useState(() => new Set())
+  const [searchResults, setSearchResults] = useState([])
+  const [searchStatus, setSearchStatus] = useState("")
+  const searchInputRef = useRef(null)
 
   const [joined, setJoined] = useState(() => {
-    const params =
-      new URLSearchParams(
-        window.location.search
-      )
-
-    return Boolean(
-      params.get("room") &&
-      params.get("username")
-    )
+    const params = new URLSearchParams(window.location.search)
+    return Boolean(params.get("room") && params.get("username"))
   })
 
-  const [shareMessage, setShareMessage] =
-    useState("")
+  const [shareMessage, setShareMessage] = useState("")
+  const [joinError, setJoinError] = useState("")
+  const [createError, setCreateError] = useState("")
+  const [createLoading, setCreateLoading] = useState(false)
+  const [joinLoading, setJoinLoading] = useState(false)
 
-  const [joinError, setJoinError] =
-    useState("")
-
-  const [createError, setCreateError] =
-    useState("")
-
-  const [createLoading, setCreateLoading] =
-    useState(false)
-
-  const [joinLoading, setJoinLoading] =
-    useState(false)
-
-  const ydoc = useMemo(
-    () => new Y.Doc(),
-    []
-  )
-
-  const ymetadata = useMemo(
-    () => ydoc.getMap("metadata"),
-    [ydoc]
-  )
-
-  const yText = useMemo(
-    () => ydoc.getText("monaco"),
-    [ydoc]
-  )
+  const ydoc = useMemo(() => new Y.Doc(), [])
+  const ymetadata = useMemo(() => ydoc.getMap("metadata"), [ydoc])
+  const yfiles = useMemo(() => ydoc.getMap("files"), [ydoc])
+  const ychat = useMemo(() => ydoc.getArray("chat"), [ydoc])
+  const yText = useMemo(() => ydoc.getText("monaco"), [ydoc])
 
   const languageRef = useRef(language)
   const validateCodeRef = useRef(null)
+  const isRunningRef = useRef(isRunning)
+  const activeFileRef = useRef(activeFile)
+  const activeActivityTabRef = useRef(activeActivityTab)
 
   useEffect(() => {
     languageRef.current = language
   }, [language])
+
+  useEffect(() => {
+    isRunningRef.current = isRunning
+  }, [isRunning])
+
+  useEffect(() => {
+    activeFileRef.current = activeFile
+  }, [activeFile])
+
+  useEffect(() => {
+    activeActivityTabRef.current = activeActivityTab
+    if (activeActivityTab === "chat") {
+      setUnreadChatCount(0)
+      setTimeout(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
+      }, 50)
+    }
+  }, [activeActivityTab])
+
+  /*
+   * Synchronize collaborative chat messages.
+   */
+  useEffect(() => {
+    const handleChatChange = () => {
+      const msgs = ychat.toArray()
+      setChatMessages(msgs)
+      if (activeActivityTabRef.current !== "chat" && msgs.length > 0) {
+        setUnreadChatCount((c) => c + 1)
+      }
+      setTimeout(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
+      }, 50)
+    }
+
+    ychat.observe(handleChatChange)
+    handleChatChange()
+
+    return () => {
+      ychat.unobserve(handleChatChange)
+    }
+  }, [ychat])
+
+  const handleSendChat = (e) => {
+    e?.preventDefault()
+    const trimmed = chatInputText.trim()
+    if (!trimmed) return
+
+    const msg = {
+      id: crypto.randomUUID(),
+      sender: username || "Anonymous",
+      text: trimmed,
+      timestamp: Date.now()
+    }
+
+    ychat.push([msg])
+    setChatInputText("")
+  }
 
   /*
    * Debounced diagnostics validation.
@@ -191,7 +512,7 @@ function App() {
   }, [validateCode])
 
   /*
-   * Re-validate and update Monaco language when language changes.
+   * Re-validate when language changes.
    */
   useEffect(() => {
     languageRef.current = language
@@ -205,6 +526,159 @@ function App() {
   }, [language, validateCode])
 
   /*
+   * Web preview console relay listener.
+   */
+  useEffect(() => {
+    const handleMsg = (event) => {
+      if (event.data?.type === "syncstream:preview_log") {
+        const { level, message } = event.data
+        const prefix =
+          level === "error"
+            ? "\u001B[31m[Preview Error]\u001B[0m "
+            : level === "warn"
+            ? "\u001B[33m[Preview Warn]\u001B[0m "
+            : "\u001B[36m[Preview Console]\u001B[0m "
+        setOutputLogs((prev) => prev + prefix + message + "\r\n")
+      }
+    }
+    window.addEventListener("message", handleMsg)
+    return () => window.removeEventListener("message", handleMsg)
+  }, [])
+
+  /*
+   * Update live web preview bundle.
+   */
+  const updatePreview = useCallback(() => {
+    if (!previewOpen) return
+    const filesMap = {}
+    for (const fname of yfiles.keys()) {
+      filesMap[fname] = ydoc.getText("file:" + fname).toString()
+    }
+    if (editorRef.current && activeFile) {
+      filesMap[activeFile] = editorRef.current.getValue()
+    }
+    const bundled = generateWebPreviewBundle(filesMap, activeFile)
+    setPreviewSrcDoc(bundled)
+  }, [previewOpen, yfiles, ydoc, activeFile])
+
+  useEffect(() => {
+    if (previewOpen) {
+      const timer = setTimeout(updatePreview, 250)
+      return () => clearTimeout(timer)
+    }
+  }, [previewOpen, previewKey, activeFile, updatePreview])
+
+  const isWebContext = useMemo(() => {
+    const webLangs = ["html", "css", "javascript", "typescript"]
+    const hasWebExt =
+      activeFile.endsWith(".html") ||
+      activeFile.endsWith(".htm") ||
+      activeFile.endsWith(".css") ||
+      activeFile.endsWith(".svg")
+
+    const workspaceHasHtml = Array.from(yfiles.keys()).some(
+      (f) => f.endsWith(".html") || f.endsWith(".htm")
+    )
+
+    return (
+      hasWebExt ||
+      (webLangs.includes(language.toLowerCase()) && workspaceHasHtml) ||
+      previewOpen
+    )
+  }, [activeFile, language, yfiles, previewOpen])
+
+  /*
+   * Synchronize files map from Yjs.
+   */
+  useEffect(() => {
+    const handleFilesChange = () => {
+      const keys = Array.from(yfiles.keys())
+      if (keys.length > 0) {
+        setFileList(keys)
+        if (!yfiles.has(activeFileRef.current)) {
+          const next = keys[0]
+          setActiveFile(next)
+          setOpenTabs((prev) => {
+            const filtered = prev.filter((f) => yfiles.has(f))
+            return filtered.length > 0 ? filtered : [next]
+          })
+        }
+      }
+    }
+
+    yfiles.observe(handleFilesChange)
+    handleFilesChange()
+
+    return () => {
+      yfiles.unobserve(handleFilesChange)
+    }
+  }, [yfiles])
+
+  /*
+   * Bind Monaco Editor to the active file's Yjs text.
+   */
+  const bindEditorToFile = useCallback((fileName) => {
+    if (!editorRef.current || !monacoRef.current || !fileName) return
+    const editor = editorRef.current
+    const monaco = monacoRef.current
+
+    if (monacoBindingRef.current) {
+      monacoBindingRef.current.destroy()
+      monacoBindingRef.current = null
+    }
+
+    const fileYText = ydoc.getText("file:" + fileName)
+    const fileLang = getLanguageFromFileName(fileName)
+
+    const model = editor.getModel()
+    if (model) {
+      monaco.editor.setModelLanguage(model, fileLang)
+      monacoBindingRef.current = new MonacoBinding(
+        fileYText,
+        model,
+        new Set([editor])
+      )
+    }
+
+    setLanguage(fileLang)
+    setTimeout(() => {
+      validateCodeRef.current?.()
+    }, 100)
+  }, [ydoc])
+
+  useEffect(() => {
+    if (editorRef.current && monacoRef.current && activeFile) {
+      bindEditorToFile(activeFile)
+    }
+  }, [activeFile, bindEditorToFile])
+
+  /*
+   * Initialize workspace files upon document sync.
+   */
+  useEffect(() => {
+    if (!documentReady) return
+
+    if (yfiles.size === 0) {
+      const defaultName = getFileNameForLanguage(language)
+      const starter = LANGUAGE_STARTERS[language] || ""
+      ydoc.transact(() => {
+        yfiles.set(defaultName, { name: defaultName, language })
+        const fileText = ydoc.getText("file:" + defaultName)
+        if (fileText.length === 0) {
+          if (yText.length > 0) {
+            fileText.insert(0, yText.toString())
+          } else if (starter) {
+            fileText.insert(0, starter)
+          }
+        }
+      })
+      setActiveFile(defaultName)
+      setOpenTabs([defaultName])
+      setFileList([defaultName])
+    }
+  }, [documentReady, yfiles, language, ydoc, yText])
+
+  /*
    * Creates the WebSocket provider when the user joins.
    */
   useEffect(() => {
@@ -212,461 +686,223 @@ function App() {
       return
     }
 
-    const provider =
-      new SpringWebSocketProvider(
-        room,
-        ydoc,
-        username,
-        setUsers,
+    const provider = new SpringWebSocketProvider(
+      room,
+      ydoc,
+      username,
+      setUsers,
 
-        /*
-         * Remote cursor
-         */
-        (cursor) => {
-          if (
-            cursor.clientId ===
-            provider.clientId
-          ) {
-            return
-          }
+      // Remote cursor
+      (cursor) => {
+        if (cursor.clientId === provider.clientId) {
+          return
+        }
 
-          const editor =
-            editorRef.current
+        const editor = editorRef.current
+        if (!editor) return
 
-          if (!editor) {
-            return
-          }
+        const model = editor.getModel()
+        if (!model) return
 
-          const model =
-            editor.getModel()
+        const lineNumber = Math.max(
+          1,
+          Math.min(cursor.lineNumber, model.getLineCount())
+        )
+        const maxColumn = model.getLineMaxColumn(lineNumber)
+        const column = Math.max(1, Math.min(cursor.column, maxColumn))
 
-          if (!model) {
-            return
-          }
-
-          const lineNumber =
-            Math.max(
-              1,
-              Math.min(
-                cursor.lineNumber,
-                model.getLineCount()
-              )
-            )
-
-          const maxColumn =
-            model.getLineMaxColumn(
-              lineNumber
-            )
-
-          const column =
-            Math.max(
-              1,
-              Math.min(
-                cursor.column,
-                maxColumn
-              )
-            )
-
-          const oldDecoration =
-            remoteCursorsRef.current.get(
-              cursor.clientId
-            )
-
-          const decorations =
-            editor.deltaDecorations(
-              oldDecoration
-                ? [oldDecoration]
-                : [],
-              [
-                {
-                  range: {
-                    startLineNumber:
-                      lineNumber,
-                    startColumn:
-                      column,
-                    endLineNumber:
-                      lineNumber,
-                    endColumn:
-                      column
-                  },
-                  options: {
-                    beforeContentClassName:
-                      "remote-cursor"
-                  }
-                }
-              ]
-            )
-
-          remoteCursorsRef.current.set(
-            cursor.clientId,
-            decorations[0]
-          )
-
-          let widget =
-            remoteCursorWidgetsRef.current.get(
-              cursor.clientId
-            )
-
-          if (!widget) {
-            widget = {
-              id:
-                `remote-cursor-${cursor.clientId}`,
-
-              position: {
-                lineNumber,
-                column
+        const oldDecoration = remoteCursorsRef.current.get(cursor.clientId)
+        const decorations = editor.deltaDecorations(
+          oldDecoration ? [oldDecoration] : [],
+          [
+            {
+              range: {
+                startLineNumber: lineNumber,
+                startColumn: column,
+                endLineNumber: lineNumber,
+                endColumn: column
               },
-
-              username:
-                cursor.username,
-
-              domNode: null,
-
-              getId() {
-                return this.id
-              },
-
-              getDomNode() {
-                if (!this.domNode) {
-                  const node =
-                    document.createElement(
-                      "div"
-                    )
-
-                  node.className =
-                    "remote-cursor-label"
-
-                  node.textContent =
-                    this.username
-
-                  this.domNode =
-                    node
-                }
-
-                return this.domNode
-              },
-
-              getPosition() {
-                return {
-                  position:
-                    this.position,
-                  preference: [
-                    1,
-                    2
-                  ]
-                }
+              options: {
+                beforeContentClassName: "remote-cursor"
               }
             }
+          ]
+        )
 
-            remoteCursorWidgetsRef.current.set(
-              cursor.clientId,
-              widget
-            )
+        remoteCursorsRef.current.set(cursor.clientId, decorations[0])
 
-            editor.addContentWidget(
-              widget
-            )
-          } else {
-            widget.position = {
-              lineNumber,
-              column
+        let widget = remoteCursorWidgetsRef.current.get(cursor.clientId)
+        if (!widget) {
+          widget = {
+            id: `remote-cursor-${cursor.clientId}`,
+            position: { lineNumber, column },
+            username: cursor.username,
+            domNode: null,
+            getId() { return this.id },
+            getDomNode() {
+              if (!this.domNode) {
+                const node = document.createElement("div")
+                node.className = "remote-cursor-label"
+                node.textContent = this.username
+                this.domNode = node
+              }
+              return this.domNode
+            },
+            getPosition() {
+              return {
+                position: this.position,
+                preference: [1, 2]
+              }
             }
-
-            widget.username =
-              cursor.username
-
-            if (widget.domNode) {
-              widget.domNode.textContent =
-                cursor.username
-            }
-
-            editor.layoutContentWidget(
-              widget
-            )
           }
-        },
-
-        /*
-         * Remote user disconnected
-         */
-        (clientId) => {
-          const editor =
-            editorRef.current
-
-          if (!editor) {
-            return
+          remoteCursorWidgetsRef.current.set(cursor.clientId, widget)
+          editor.addContentWidget(widget)
+        } else {
+          widget.position = { lineNumber, column }
+          widget.username = cursor.username
+          if (widget.domNode) {
+            widget.domNode.textContent = cursor.username
           }
-
-          const decoration =
-            remoteCursorsRef.current.get(
-              clientId
-            )
-
-          if (decoration) {
-            editor.deltaDecorations(
-              [decoration],
-              []
-            )
-
-            remoteCursorsRef.current.delete(
-              clientId
-            )
-          }
-
-          const widget =
-            remoteCursorWidgetsRef.current.get(
-              clientId
-            )
-
-          if (widget) {
-            editor.removeContentWidget(
-              widget
-            )
-
-            remoteCursorWidgetsRef.current.delete(
-              clientId
-            )
-          }
-
-          const selection =
-            remoteSelectionsRef.current.get(
-              clientId
-            )
-
-          if (selection) {
-            editor.deltaDecorations(
-              [selection],
-              []
-            )
-
-            remoteSelectionsRef.current.delete(
-              clientId
-            )
-          }
-        },
-
-        /*
-         * Remote selection
-         */
-        (selection) => {
-          if (
-            selection.clientId ===
-            provider.clientId
-          ) {
-            return
-          }
-
-          const editor =
-            editorRef.current
-
-          if (!editor) {
-            return
-          }
-
-          const model =
-            editor.getModel()
-
-          if (!model) {
-            return
-          }
-
-          const clientId =
-            selection.clientId
-
-          const remoteSelection =
-            selection.selection
-
-          const oldDecoration =
-            remoteSelectionsRef.current.get(
-              clientId
-            )
-
-          if (oldDecoration) {
-            editor.deltaDecorations(
-              [oldDecoration],
-              []
-            )
-
-            remoteSelectionsRef.current.delete(
-              clientId
-            )
-          }
-
-          if (!remoteSelection) {
-            return
-          }
-
-          const startLineNumber =
-            Math.max(
-              1,
-              Math.min(
-                remoteSelection.startLineNumber,
-                model.getLineCount()
-              )
-            )
-
-          const endLineNumber =
-            Math.max(
-              startLineNumber,
-              Math.min(
-                remoteSelection.endLineNumber,
-                model.getLineCount()
-              )
-            )
-
-          const startColumn =
-            Math.max(
-              1,
-              Math.min(
-                remoteSelection.startColumn,
-                model.getLineMaxColumn(
-                  startLineNumber
-                )
-              )
-            )
-
-          const endColumn =
-            Math.max(
-              1,
-              Math.min(
-                remoteSelection.endColumn,
-                model.getLineMaxColumn(
-                  endLineNumber
-                )
-              )
-            )
-
-          const decorations =
-            editor.deltaDecorations(
-              [],
-              [
-                {
-                  range: {
-                    startLineNumber,
-                    startColumn,
-                    endLineNumber,
-                    endColumn
-                  },
-
-                  options: {
-                    className:
-                      "remote-selection"
-                  }
-                }
-              ]
-            )
-
-          remoteSelectionsRef.current.set(
-            clientId,
-            decorations[0]
-          )
-        },
-
-        /*
-         * Connection state
-         */
-        (state) => {
-          setConnectionState(state)
-        },
-
-        /*
-         * Document synchronization completed
-         */
-        () => {
-          setDocumentReady(true)
+          editor.layoutContentWidget(widget)
         }
-      )
+      },
 
-    providerRef.current =
-      provider
+      // Remote user disconnected
+      (clientId) => {
+        const editor = editorRef.current
+        if (!editor) return
+
+        const decoration = remoteCursorsRef.current.get(clientId)
+        if (decoration) {
+          editor.deltaDecorations([decoration], [])
+          remoteCursorsRef.current.delete(clientId)
+        }
+
+        const widget = remoteCursorWidgetsRef.current.get(clientId)
+        if (widget) {
+          editor.removeContentWidget(widget)
+          remoteCursorWidgetsRef.current.delete(clientId)
+        }
+
+        const selection = remoteSelectionsRef.current.get(clientId)
+        if (selection) {
+          editor.deltaDecorations([selection], [])
+          remoteSelectionsRef.current.delete(clientId)
+        }
+      },
+
+      // Remote selection
+      (selection) => {
+        if (selection.clientId === provider.clientId) return
+        const editor = editorRef.current
+        if (!editor) return
+
+        const model = editor.getModel()
+        if (!model) return
+
+        const clientId = selection.clientId
+        const remoteSelection = selection.selection
+
+        const oldDecoration = remoteSelectionsRef.current.get(clientId)
+        if (oldDecoration) {
+          editor.deltaDecorations([oldDecoration], [])
+          remoteSelectionsRef.current.delete(clientId)
+        }
+
+        if (!remoteSelection) return
+
+        const startLineNumber = Math.max(
+          1,
+          Math.min(remoteSelection.startLineNumber, model.getLineCount())
+        )
+        const endLineNumber = Math.max(
+          startLineNumber,
+          Math.min(remoteSelection.endLineNumber, model.getLineCount())
+        )
+        const startColumn = Math.max(
+          1,
+          Math.min(remoteSelection.startColumn, model.getLineMaxColumn(startLineNumber))
+        )
+        const endColumn = Math.max(
+          1,
+          Math.min(remoteSelection.endColumn, model.getLineMaxColumn(endLineNumber))
+        )
+
+        const decorations = editor.deltaDecorations(
+          [],
+          [
+            {
+              range: {
+                startLineNumber,
+                startColumn,
+                endLineNumber,
+                endColumn
+              },
+              options: {
+                className: "remote-selection"
+              }
+            }
+          ]
+        )
+        remoteSelectionsRef.current.set(clientId, decorations[0])
+      },
+
+      // Connection state
+      (state) => {
+        setConnectionState(state)
+      },
+
+      // Document synchronization completed
+      () => {
+        setDocumentReady(true)
+      }
+    )
+
+    providerRef.current = provider
 
     return () => {
       provider.disconnect()
+      providerRef.current = null
 
-      providerRef.current =
-        null
-
-      const editor =
-        editorRef.current
-
+      const editor = editorRef.current
       if (editor) {
-        const decorations = [
-          ...remoteCursorsRef.current.values()
-        ]
+        const decorations = [...remoteCursorsRef.current.values()]
+        editor.deltaDecorations(decorations, [])
 
-        editor.deltaDecorations(
-          decorations,
-          []
-        )
-
-        for (
-          const widget of
-          remoteCursorWidgetsRef.current.values()
-        ) {
-          editor.removeContentWidget(
-            widget
-          )
+        for (const widget of remoteCursorWidgetsRef.current.values()) {
+          editor.removeContentWidget(widget)
         }
 
-        const selectionDecorations = [
-          ...remoteSelectionsRef.current.values()
-        ]
-
-        editor.deltaDecorations(
-          selectionDecorations,
-          []
-        )
+        const selectionDecorations = [...remoteSelectionsRef.current.values()]
+        editor.deltaDecorations(selectionDecorations, [])
       }
 
       remoteCursorsRef.current.clear()
       remoteCursorWidgetsRef.current.clear()
       remoteSelectionsRef.current.clear()
     }
-  }, [
-    joined,
-    username,
-    room,
-    ydoc
-  ])
+  }, [joined, username, room, ydoc])
 
   /*
    * Shared language metadata.
    */
   useEffect(() => {
-    const handleLanguageChange =
-      () => {
-        const sharedLanguage =
-          ymetadata.get("language")
-
-        if (
-          typeof sharedLanguage ===
-          "string"
-        ) {
-          setLanguage(
-            sharedLanguage
-          )
-        }
+    const handleLanguageChange = () => {
+      const sharedLanguage = ymetadata.get("language")
+      if (typeof sharedLanguage === "string") {
+        setLanguage(sharedLanguage)
       }
+    }
 
-    if (
-      !ymetadata.has("language")
-    ) {
-      ymetadata.set(
-        "language",
-        "javascript"
-      )
+    if (!ymetadata.has("language")) {
+      ymetadata.set("language", "javascript")
     }
 
     handleLanguageChange()
-
-    ymetadata.observe(
-      handleLanguageChange
-    )
+    ymetadata.observe(handleLanguageChange)
 
     return () => {
-      ymetadata.unobserve(
-        handleLanguageChange
-      )
+      ymetadata.unobserve(handleLanguageChange)
     }
   }, [ymetadata])
 
@@ -676,41 +912,23 @@ function App() {
   useEffect(() => {
     if (!joined) {
       setConnectionTimedOut(false)
-
-      if (
-        connectionTimeoutRef.current
-      ) {
-        clearTimeout(
-          connectionTimeoutRef.current
-        )
-
-        connectionTimeoutRef.current =
-          null
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current)
+        connectionTimeoutRef.current = null
       }
-
       return
     }
 
     setConnectionTimedOut(false)
-
-    connectionTimeoutRef.current =
-      setTimeout(() => {
-        setConnectionTimedOut(true)
-
-        connectionTimeoutRef.current =
-          null
-      }, 15000)
+    connectionTimeoutRef.current = setTimeout(() => {
+      setConnectionTimedOut(true)
+      connectionTimeoutRef.current = null
+    }, 15000)
 
     return () => {
-      if (
-        connectionTimeoutRef.current
-      ) {
-        clearTimeout(
-          connectionTimeoutRef.current
-        )
-
-        connectionTimeoutRef.current =
-          null
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current)
+        connectionTimeoutRef.current = null
       }
     }
   }, [joined])
@@ -719,24 +937,11 @@ function App() {
    * Stop timeout once connected.
    */
   useEffect(() => {
-    if (
-      connectionState !==
-      "CONNECTED"
-    ) {
-      return
-    }
-
+    if (connectionState !== "CONNECTED") return
     setConnectionTimedOut(false)
-
-    if (
-      connectionTimeoutRef.current
-    ) {
-      clearTimeout(
-        connectionTimeoutRef.current
-      )
-
-      connectionTimeoutRef.current =
-        null
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current)
+      connectionTimeoutRef.current = null
     }
   }, [connectionState])
 
@@ -744,326 +949,241 @@ function App() {
    * Xterm terminal initialization.
    */
   useEffect(() => {
-    if (
-      !terminalOpen ||
-      !terminalContainerRef.current
-    ) {
-      return
-    }
+    if (!terminalOpen || !terminalContainerRef.current) return
 
-    const terminal =
-      new Terminal({
-        cursorBlink: true,
-        fontSize: 13,
-        fontFamily:
-          "Consolas, 'Courier New', monospace",
-        convertEol: true,
+    const terminal = new Terminal({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: "Consolas, 'Courier New', monospace",
+      convertEol: true,
+      theme: {
+        background: "#090d13",
+        foreground: "#c9d1d9",
+        cursor: "#58a6ff",
+        cursorAccent: "#090d13",
+        selectionBackground: "#1f6feb40"
+      },
+      scrollback: 5000,
+      allowTransparency: false
+    })
 
-        theme: {
-          background: "#090d13",
-          foreground: "#c9d1d9",
-          cursor: "#58a6ff",
-          cursorAccent:
-            "#090d13",
-          selectionBackground:
-            "#1f6feb40"
-        },
+    terminal.open(terminalContainerRef.current)
+    terminalRef.current = terminal
 
-        scrollback: 5000,
-        allowTransparency: false
-      })
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
+    const clientId = providerRef.current?.clientId || ""
 
-    terminal.open(
-      terminalContainerRef.current
+    const socket = new WebSocket(
+      `${protocol}//${window.location.hostname}:8080/ws/terminal?room=${encodeURIComponent(
+        room
+      )}&username=${encodeURIComponent(
+        username
+      )}&clientId=${encodeURIComponent(clientId)}`
     )
 
-    terminalRef.current =
-      terminal
-
-    const protocol =
-      window.location.protocol ===
-      "https:"
-        ? "wss:"
-        : "ws:"
-
-    const clientId =
-      providerRef.current?.clientId ||
-      ""
-
-    const socket =
-      new WebSocket(
-        `${protocol}//${window.location.hostname}:8080/ws/terminal?room=${encodeURIComponent(
-          room
-        )}&username=${encodeURIComponent(
-          username
-        )}&clientId=${encodeURIComponent(
-          clientId
-        )}`
-      )
-
-    socket.binaryType =
-      "arraybuffer"
-
-    terminalSocketRef.current =
-      socket
+    socket.binaryType = "arraybuffer"
+    terminalSocketRef.current = socket
 
     socket.onopen = () => {
-      console.log(
-        "Terminal WebSocket connected"
-      )
+      console.log("Terminal WebSocket connected")
     }
 
-    socket.onmessage =
-      (event) => {
-        let text = ""
-        if (
-          typeof event.data ===
-          "string"
-        ) {
-          text = event.data
-        } else if (
-          event.data instanceof
-          ArrayBuffer
-        ) {
-          text = new TextDecoder().decode(
-            new Uint8Array(
-              event.data
-            )
-          )
-        }
-
-        terminal.write(text)
-        setOutputLogs((prev) => prev + text)
-
-        if (text.includes("Execution Finished") || text.includes("exited with code") || text.includes("$ ")) {
-          setIsRunning(false)
-        }
-
-        // Check for compiler runtime error markers
-        const runtimeMarkers = parseCompilerOutput(text, language)
-        if (runtimeMarkers.length > 0 && editorRef.current && monacoRef.current) {
-          const model = editorRef.current.getModel()
-          if (model) {
-            const currentMarkers = monacoRef.current.editor.getModelMarkers({ resource: model.uri })
-            const combined = [...currentMarkers, ...runtimeMarkers]
-            monacoRef.current.editor.setModelMarkers(model, "syncstream-diagnostics", combined)
-            setDiagnostics(combined)
-          }
-        }
+    socket.onmessage = (event) => {
+      let text = ""
+      if (typeof event.data === "string") {
+        text = event.data
+      } else if (event.data instanceof ArrayBuffer) {
+        text = new TextDecoder().decode(new Uint8Array(event.data))
       }
 
-    socket.onerror =
-      (error) => {
-        console.error(
-          "Terminal WebSocket error",
-          error
-        )
+      terminal.write(text)
+      setOutputLogs((prev) => prev + text)
 
-        terminal.write(
-          "\r\n[Terminal connection error]\r\n"
-        )
+      if (
+        text.includes("Execution Finished") ||
+        text.includes("exited with code") ||
+        text.includes("timed out") ||
+        text.includes("$ ")
+      ) {
         setIsRunning(false)
       }
 
+      // Merge runtime error markers
+      const runtimeMarkers = parseCompilerOutput(text, language)
+      if (runtimeMarkers.length > 0 && editorRef.current && monacoRef.current) {
+        const model = editorRef.current.getModel()
+        if (model) {
+          const currentMarkers = monacoRef.current.editor
+            .getModelMarkers({ resource: model.uri })
+            .filter((m) => m.owner === "syncstream-diagnostics")
+          const combined = [...currentMarkers, ...runtimeMarkers]
+          monacoRef.current.editor.setModelMarkers(model, "syncstream-diagnostics", combined)
+          setDiagnostics(combined)
+        }
+      }
+    }
+
+    socket.onerror = (error) => {
+      console.error("Terminal WebSocket error", error)
+      terminal.write("\r\n[Terminal connection error]\r\n")
+      setIsRunning(false)
+    }
+
     socket.onclose = () => {
-      terminal.write(
-        "\r\n[Terminal disconnected]\r\n"
-      )
+      terminal.write("\r\n[Terminal disconnected]\r\n")
       setIsRunning(false)
     }
 
     let command = ""
+    const cmdHistory = []
+    let historyIndex = -1
+    let savedCommand = ""
 
-    const dataDisposable =
-      terminal.onData(
-        (data) => {
-          if (
-            data === "\r" ||
-            data === "\n"
-          ) {
-            terminal.write(
-              "\r\n"
-            )
+    const rewriteLine = (text) => {
+      terminal.write("\r\u001B[K$ " + text)
+    }
 
-            if (
-              command.trim()
-            ) {
-              if (
-                socket.readyState ===
-                WebSocket.OPEN
-              ) {
-                socket.send(
-                  command
-                )
-              }
-            } else {
-              terminal.write(
-                "$ "
-              )
-            }
+    const dataDisposable = terminal.onData((data) => {
+      // Enter — submit command or interactive stdin input
+      if (data === "\r" || data === "\n") {
+        terminal.write("\r\n")
 
-            command = ""
-
-            return
+        if (isRunningRef.current) {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(command)
           }
-
-          if (
-            data === "\u007F"
-          ) {
-            if (
-              command.length > 0
-            ) {
-              command =
-                command.slice(
-                  0,
-                  -1
-                )
-
-              terminal.write(
-                "\b \b"
-              )
-            }
-
-            return
-          }
-
-          if (
-            data === "\u0003"
-          ) {
-            command = ""
-
-            if (
-              socket.readyState ===
-              WebSocket.OPEN
-            ) {
-              socket.send("\u0003")
-            }
-
-            terminal.write(
-              "^C\r\n"
-            )
-            setIsRunning(false)
-
-            return
-          }
-
-          if (
-            data >= " " &&
-            data <= "~"
-          ) {
-            command += data
-
-            terminal.write(
-              data
-            )
-          }
-        }
-      )
-
-    const resizeTerminal =
-      () => {
-        const container =
-          terminalContainerRef.current
-
-        if (!container) {
+          command = ""
           return
         }
 
-        const rect =
-          container.getBoundingClientRect()
+        const trimmed = command.trim()
+        if (trimmed) {
+          if (cmdHistory[cmdHistory.length - 1] !== trimmed) {
+            cmdHistory.push(trimmed)
+            if (cmdHistory.length > 100) cmdHistory.shift()
+          }
+          historyIndex = -1
+          savedCommand = ""
 
-        if (
-          rect.width <= 0 ||
-          rect.height <= 0
-        ) {
-          return
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(command)
+          }
+        } else {
+          terminal.write("$ ")
         }
 
-        const cellWidth = 8.0
-        const cellHeight = 16.5
-
-        const cols =
-          Math.max(
-            2,
-            Math.floor(
-              rect.width /
-              cellWidth
-            )
-          )
-
-        const rows =
-          Math.max(
-            1,
-            Math.floor(
-              rect.height /
-              cellHeight
-            )
-          )
-
-        terminal.resize(
-          cols,
-          rows
-        )
+        command = ""
+        return
       }
 
-    terminalResizeObserverRef.current =
-      new ResizeObserver(
-        resizeTerminal
-      )
+      // Backspace (DEL)
+      if (data === "\u007F") {
+        if (command.length > 0) {
+          command = command.slice(0, -1)
+          terminal.write("\b \b")
+        }
+        return
+      }
 
-    terminalResizeObserverRef.current.observe(
-      terminalContainerRef.current
-    )
+      // Ctrl+C — interrupt
+      if (data === "\u0003") {
+        command = ""
+        historyIndex = -1
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send("\u0003")
+        }
+        terminal.write("^C\r\n")
+        setIsRunning(false)
+        return
+      }
 
-    requestAnimationFrame(
-      resizeTerminal
-    )
+      // Ctrl+L — clear screen
+      if (data === "\u000C") {
+        terminal.write("\u001B[2J\u001B[H$ " + command)
+        return
+      }
+
+      // Arrow Up — history previous
+      if (data === "\u001B[A") {
+        if (cmdHistory.length === 0) return
+        if (historyIndex === -1) {
+          savedCommand = command
+          historyIndex = cmdHistory.length - 1
+        } else if (historyIndex > 0) {
+          historyIndex--
+        }
+        command = cmdHistory[historyIndex]
+        rewriteLine(command)
+        return
+      }
+
+      // Arrow Down — history next
+      if (data === "\u001B[B") {
+        if (historyIndex === -1) return
+        if (historyIndex < cmdHistory.length - 1) {
+          historyIndex++
+          command = cmdHistory[historyIndex]
+        } else {
+          historyIndex = -1
+          command = savedCommand
+        }
+        rewriteLine(command)
+        return
+      }
+
+      if (data === "\u001B[C" || data === "\u001B[D") {
+        return
+      }
+
+      // Printable characters
+      if (data >= " " && data <= "~") {
+        command += data
+        terminal.write(data)
+      }
+    })
+
+    const resizeTerminal = () => {
+      const container = terminalContainerRef.current
+      if (!container) return
+
+      const rect = container.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) return
+
+      const cellWidth = 8.0
+      const cellHeight = 16.5
+      const cols = Math.max(2, Math.floor(rect.width / cellWidth))
+      const rows = Math.max(1, Math.floor(rect.height / cellHeight))
+
+      terminal.resize(cols, rows)
+    }
+
+    terminalResizeObserverRef.current = new ResizeObserver(resizeTerminal)
+    terminalResizeObserverRef.current.observe(terminalContainerRef.current)
+    requestAnimationFrame(resizeTerminal)
 
     return () => {
       dataDisposable.dispose()
-
-      if (
-        terminalResizeObserverRef.current
-      ) {
+      if (terminalResizeObserverRef.current) {
         terminalResizeObserverRef.current.disconnect()
-
-        terminalResizeObserverRef.current =
-          null
+        terminalResizeObserverRef.current = null
       }
-
       if (
-        socket.readyState ===
-          WebSocket.OPEN ||
-        socket.readyState ===
-          WebSocket.CONNECTING
+        socket.readyState === WebSocket.OPEN ||
+        socket.readyState === WebSocket.CONNECTING
       ) {
         socket.close()
       }
-
-      terminalSocketRef.current =
-        null
-
+      terminalSocketRef.current = null
       terminal.dispose()
-
-      terminalRef.current =
-        null
+      terminalRef.current = null
     }
-  }, [
-    terminalOpen,
-    room,
-    username,
-    language
-  ])
+  }, [terminalOpen, room, username, language])
 
   /*
    * Focus terminal when opened.
    */
   useEffect(() => {
-    if (
-      terminalOpen &&
-      activeBottomTab === "terminal" &&
-      terminalRef.current
-    ) {
+    if (terminalOpen && activeBottomTab === "terminal" && terminalRef.current) {
       requestAnimationFrame(() => {
         terminalRef.current?.focus()
       })
@@ -1074,38 +1194,29 @@ function App() {
    * Keep terminal sized correctly.
    */
   useEffect(() => {
-    if (
-      !terminalOpen ||
-      !terminalRef.current
-    ) {
-      return
-    }
-
-    const timer =
-      setTimeout(() => {
-        window.dispatchEvent(
-          new Event("resize")
-        )
-      }, 0)
-
-    return () => {
-      clearTimeout(timer)
-    }
-  }, [
-    terminalHeight,
-    terminalMaximized,
-    activeBottomTab
-  ])
+    if (!terminalOpen || !terminalRef.current) return
+    const timer = setTimeout(() => {
+      window.dispatchEvent(new Event("resize"))
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [terminalHeight, terminalMaximized, activeBottomTab])
 
   /*
-   * Execute code in runner via clean shell command.
+   * Execute multi-file project in runner.
    */
   const handleRunCode = useCallback(() => {
-    if (!editorRef.current) {
-      return
+    if (!editorRef.current) return
+
+    const filesPayload = {}
+    for (const fname of yfiles.keys()) {
+      filesPayload[fname] = ydoc.getText("file:" + fname).toString()
     }
 
-    const code = editorRef.current.getValue()
+    filesPayload[activeFile] = editorRef.current.getValue()
+
+    if (Object.values(filesPayload).every((c) => !c.trim())) {
+      return
+    }
 
     if (!terminalOpen) {
       setTerminalOpen(true)
@@ -1113,14 +1224,19 @@ function App() {
     setActiveBottomTab("terminal")
     setIsRunning(true)
 
-    const cmd = getExecutionCommand(language, code)
+    const payload = JSON.stringify({
+      type: "run_project",
+      activeFile,
+      language: getLanguageFromFileName(activeFile),
+      files: filesPayload
+    })
 
     const sendCmd = () => {
       if (
         terminalSocketRef.current &&
         terminalSocketRef.current.readyState === WebSocket.OPEN
       ) {
-        terminalSocketRef.current.send(cmd)
+        terminalSocketRef.current.send(payload)
       }
     }
 
@@ -1132,236 +1248,157 @@ function App() {
     } else {
       setTimeout(sendCmd, 500)
     }
-  }, [editorRef, terminalOpen, language])
+  }, [editorRef, terminalOpen, activeFile, yfiles, ydoc])
 
   /*
    * Keyboard shortcuts: Ctrl+` (toggle terminal) and Ctrl+Enter / F5 (Run).
    */
   useEffect(() => {
-    const handleKeyDown =
-      (event) => {
-        if (
-          event.ctrlKey &&
-          event.key === "`"
-        ) {
-          event.preventDefault()
-
-          setTerminalOpen(
-            (current) => !current
-          )
-        } else if (
-          (event.ctrlKey || event.metaKey) &&
-          event.key === "Enter"
-        ) {
-          event.preventDefault()
-          handleRunCode()
-        } else if (event.key === "F5") {
-          event.preventDefault()
-          handleRunCode()
-        }
+    const handleKeyDown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === "F" || event.key === "f")) {
+        event.preventDefault()
+        setActiveActivityTab("search")
+        setSidebarOpen(true)
+        setTimeout(() => {
+          searchInputRef.current?.focus()
+          searchInputRef.current?.select()
+        }, 50)
+      } else if ((event.ctrlKey || event.metaKey) && (event.key === "b" || event.key === "B")) {
+        event.preventDefault()
+        setSidebarOpen((s) => !s)
+      } else if (event.ctrlKey && event.key === "`") {
+        event.preventDefault()
+        setTerminalOpen((current) => !current)
+      } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault()
+        handleRunCode()
+      } else if (event.key === "F5") {
+        event.preventDefault()
+        handleRunCode()
       }
-
-    window.addEventListener(
-      "keydown",
-      handleKeyDown
-    )
-
-    return () => {
-      window.removeEventListener(
-        "keydown",
-        handleKeyDown
-      )
     }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
   }, [handleRunCode])
 
   /*
-   * Terminal resizing.
+   * Draggable sidebar & terminal resizers.
    */
-  useEffect(() => {
-    if (
-      !terminalOpen ||
-      terminalMaximized
-    ) {
-      return
+  const handleStartSidebarResize = useCallback((e) => {
+    e.preventDefault()
+    setIsResizingSidebar(true)
+    document.body.style.cursor = "ew-resize"
+    document.body.style.userSelect = "none"
+
+    const startX = e.clientX
+    const startWidth = sidebarWidth
+
+    const onMouseMove = (moveEvent) => {
+      const delta = moveEvent.clientX - startX
+      const nextWidth = Math.max(180, Math.min(600, startWidth + delta))
+      setSidebarWidth(nextWidth)
     }
 
-    const handleResize =
-      (event) => {
-        const startY =
-          event.clientY
-
-        const startHeight =
-          terminalHeight
-
-        document.body.style.cursor =
-          "ns-resize"
-
-        document.body.style.userSelect =
-          "none"
-
-        const onMove =
-          (moveEvent) => {
-            const delta =
-              startY -
-              moveEvent.clientY
-
-            const maxHeight =
-              Math.floor(
-                window.innerHeight *
-                0.75
-              )
-
-            const nextHeight =
-              Math.max(
-                140,
-                Math.min(
-                  maxHeight,
-                  startHeight +
-                    delta
-                )
-              )
-
-            setTerminalHeight(
-              nextHeight
-            )
-          }
-
-        const onUp =
-          () => {
-            document.body.style.cursor =
-              ""
-
-            document.body.style.userSelect =
-              ""
-
-            window.removeEventListener(
-              "mousemove",
-              onMove
-            )
-
-            window.removeEventListener(
-              "mouseup",
-              onUp
-            )
-          }
-
-        window.addEventListener(
-          "mousemove",
-          onMove
-        )
-
-        window.addEventListener(
-          "mouseup",
-          onUp
-        )
-      }
-
-    const handle =
-      document.querySelector(
-        ".terminal-resize-handle"
-      )
-
-    if (!handle) {
-      return
+    const onMouseUp = () => {
+      setIsResizingSidebar(false)
+      document.body.style.cursor = ""
+      document.body.style.userSelect = ""
+      window.removeEventListener("mousemove", onMouseMove)
+      window.removeEventListener("mouseup", onMouseUp)
     }
 
-    handle.addEventListener(
-      "mousedown",
-      handleResize
-    )
+    window.addEventListener("mousemove", onMouseMove)
+    window.addEventListener("mouseup", onMouseUp)
+  }, [sidebarWidth])
 
-    return () => {
-      handle.removeEventListener(
-        "mousedown",
-        handleResize
-      )
+  const handleStartTerminalResize = useCallback((e) => {
+    e.preventDefault()
+    setIsResizingTerminal(true)
+    document.body.style.cursor = "ns-resize"
+    document.body.style.userSelect = "none"
+
+    const startY = e.clientY
+    const startHeight = terminalHeight
+
+    const onMouseMove = (moveEvent) => {
+      const delta = startY - moveEvent.clientY
+      const maxHeight = Math.floor(window.innerHeight * 0.75)
+      const nextHeight = Math.max(140, Math.min(maxHeight, startHeight + delta))
+      setTerminalHeight(nextHeight)
     }
-  }, [
-    terminalOpen,
-    terminalMaximized,
-    terminalHeight
-  ])
+
+    const onMouseUp = () => {
+      setIsResizingTerminal(false)
+      document.body.style.cursor = ""
+      document.body.style.userSelect = ""
+      window.removeEventListener("mousemove", onMouseMove)
+      window.removeEventListener("mouseup", onMouseUp)
+    }
+
+    window.addEventListener("mousemove", onMouseMove)
+    window.addEventListener("mouseup", onMouseUp)
+  }, [terminalHeight])
 
   /*
    * Monaco editor setup.
    */
-  const handleMount =
-    (editor, monaco) => {
-      editorRef.current = editor
-      monacoRef.current = monaco
+  const handleMount = (editor, monaco) => {
+    editorRef.current = editor
+    monacoRef.current = monaco
 
-      new MonacoBinding(
-        yText,
-        editor.getModel(),
-        new Set([editor])
-      )
+    bindEditorToFile(activeFileRef.current)
 
-      editor.onDidChangeCursorPosition(
-        (event) => {
-          const position = event.position
-          setCursorPos({
-            lineNumber: position.lineNumber,
-            column: position.column
-          })
-
-          providerRef.current?.sendCursorPosition(
-            position.lineNumber,
-            position.column
-          )
-        }
-      )
-
-      editor.onDidChangeCursorSelection(
-        (event) => {
-          const selection =
-            event.selection
-
-          const hasSelection =
-            selection.startLineNumber !==
-              selection.endLineNumber ||
-            selection.startColumn !==
-              selection.endColumn
-
-          providerRef.current?.sendSelection(
-            hasSelection
-              ? {
-                  startLineNumber:
-                    selection.startLineNumber,
-
-                  startColumn:
-                    selection.startColumn,
-
-                  endLineNumber:
-                    selection.endLineNumber,
-
-                  endColumn:
-                    selection.endColumn
-                }
-              : null
-          )
-        }
-      )
-
-      editor.onDidChangeModelContent(() => {
-        if (validationTimerRef.current) {
-          clearTimeout(validationTimerRef.current)
-        }
-
-        validationTimerRef.current = setTimeout(() => {
-          validateCodeRef.current?.()
-        }, 200)
+    editor.onDidChangeCursorPosition((event) => {
+      const position = event.position
+      setCursorPos({
+        lineNumber: position.lineNumber,
+        column: position.column
       })
 
-      setTimeout(() => {
+      providerRef.current?.sendCursorPosition(
+        position.lineNumber,
+        position.column
+      )
+    })
+
+    editor.onDidChangeCursorSelection((event) => {
+      const selection = event.selection
+      const hasSelection =
+        selection.startLineNumber !== selection.endLineNumber ||
+        selection.startColumn !== selection.endColumn
+
+      providerRef.current?.sendSelection(
+        hasSelection
+          ? {
+              startLineNumber: selection.startLineNumber,
+              startColumn: selection.startColumn,
+              endLineNumber: selection.endLineNumber,
+              endColumn: selection.endColumn
+            }
+          : null
+      )
+    })
+
+    editor.onDidChangeModelContent(() => {
+      if (validationTimerRef.current) {
+        clearTimeout(validationTimerRef.current)
+      }
+      validationTimerRef.current = setTimeout(() => {
         validateCodeRef.current?.()
-      }, 250)
-    }
+      }, 200)
+
+      if (previewOpen) {
+        if (previewTimerRef.current) {
+          clearTimeout(previewTimerRef.current)
+        }
+        previewTimerRef.current = setTimeout(updatePreview, 300)
+      }
+    })
+  }
 
   const handleProblemClick = (problem) => {
-    if (!editorRef.current) {
-      return
-    }
-
+    if (!editorRef.current) return
     editorRef.current.revealLineInCenter(problem.startLineNumber)
     editorRef.current.setPosition({
       lineNumber: problem.startLineNumber,
@@ -1371,301 +1408,1041 @@ function App() {
   }
 
   const handleInsertTemplate = () => {
-    const starter = LANGUAGE_STARTERS[language]
-    if (!starter || !editorRef.current) {
+    const currentLang = getLanguageFromFileName(activeFile)
+    const starter = LANGUAGE_STARTERS[currentLang]
+    if (!starter || !editorRef.current) return
+
+    const activeYText = ydoc.getText("file:" + activeFile)
+    ydoc.transact(() => {
+      activeYText.delete(0, activeYText.length)
+      activeYText.insert(0, starter)
+    })
+  }
+
+  // Export Project as ZIP
+  const handleExportZip = async () => {
+    try {
+      const zip = new JSZip()
+      for (const fname of yfiles.keys()) {
+        if (fname.endsWith(".keep") && yfiles.size > 1) continue
+        const content = ydoc.getText("file:" + fname).toString()
+        zip.file(fname, content)
+      }
+      const blob = await zip.generateAsync({ type: "blob" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `${room || "syncstream"}-project.zip`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("Failed to export ZIP", err)
+      alert("Failed to export project: " + err.message)
+    }
+  }
+
+  // Import ZIP Archive
+  const handleImportZipFile = async (file) => {
+    try {
+      const zip = new JSZip()
+      const loadedZip = await zip.loadAsync(file)
+      const newFiles = {}
+      const foldersToExpand = new Set()
+
+      for (const [relativePath, zipEntry] of Object.entries(loadedZip.files)) {
+        if (zipEntry.dir) continue
+        if (
+          relativePath.includes("__MACOSX") ||
+          relativePath.includes(".DS_Store") ||
+          relativePath.includes("node_modules/") ||
+          relativePath.includes(".git/")
+        ) {
+          continue
+        }
+
+        const text = await zipEntry.async("string")
+        newFiles[relativePath] = text
+
+        const parts = relativePath.split("/")
+        if (parts.length > 1) {
+          for (let i = 1; i < parts.length; i++) {
+            foldersToExpand.add(parts.slice(0, i).join("/"))
+          }
+        }
+      }
+
+      if (Object.keys(newFiles).length === 0) {
+        alert("No readable text files found in the archive.")
+        return
+      }
+
+      ydoc.transact(() => {
+        for (const [path, content] of Object.entries(newFiles)) {
+          const fileLang = getLanguageFromFileName(path)
+          yfiles.set(path, { name: path, language: fileLang })
+          const ytext = ydoc.getText("file:" + path)
+          ytext.delete(0, ytext.length)
+          ytext.insert(0, content)
+        }
+      })
+
+      setExpandedFolders((prev) => new Set([...prev, ...foldersToExpand]))
+      const firstFile = Object.keys(newFiles)[0]
+      if (firstFile) {
+        setOpenTabs((prev) => (prev.includes(firstFile) ? prev : [...prev, firstFile]))
+        setActiveFile(firstFile)
+      }
+    } catch (err) {
+      console.error("Failed to import ZIP", err)
+      alert("Failed to import project archive: " + err.message)
+    }
+  }
+
+  // Drag and Drop File / Folder Handler
+  const handleDrop = async (e) => {
+    e.preventDefault()
+    setIsDraggingOver(false)
+    const items = e.dataTransfer.items
+    const files = e.dataTransfer.files
+
+    if (!items && !files) return
+
+    if (files && files.length === 1 && files[0].name.endsWith(".zip")) {
+      handleImportZipFile(files[0])
+      return
+    }
+
+    const imported = {}
+    const foldersToExpand = new Set()
+
+    const readEntry = async (entry, currentPath = "") => {
+      if (entry.isFile) {
+        const file = await new Promise((resolve) => entry.file(resolve))
+        if (
+          file.size < 1024 * 1024 &&
+          !file.name.includes(".DS_Store") &&
+          !file.name.endsWith(".lock")
+        ) {
+          const text = await file.text()
+          const fullPath = currentPath ? `${currentPath}/${file.name}` : file.name
+          imported[fullPath] = text
+          if (currentPath) {
+            foldersToExpand.add(currentPath)
+          }
+        }
+      } else if (entry.isDirectory) {
+        if (
+          entry.name === "node_modules" ||
+          entry.name === ".git" ||
+          entry.name === "dist"
+        ) {
+          return
+        }
+        const dirReader = entry.createReader()
+        const entries = await new Promise((resolve) => dirReader.readEntries(resolve))
+        const nextPath = currentPath ? `${currentPath}/${entry.name}` : entry.name
+        foldersToExpand.add(nextPath)
+        for (const child of entries) {
+          await readEntry(child, nextPath)
+        }
+      }
+    }
+
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        const entry = items[i].webkitGetAsEntry?.()
+        if (entry) {
+          await readEntry(entry)
+        }
+      }
+    }
+
+    if (Object.keys(imported).length > 0) {
+      ydoc.transact(() => {
+        for (const [path, content] of Object.entries(imported)) {
+          const fileLang = getLanguageFromFileName(path)
+          yfiles.set(path, { name: path, language: fileLang })
+          const ytext = ydoc.getText("file:" + path)
+          ytext.delete(0, ytext.length)
+          ytext.insert(0, content)
+        }
+      })
+      setExpandedFolders((prev) => new Set([...prev, ...foldersToExpand]))
+      const first = Object.keys(imported)[0]
+      if (first) {
+        setOpenTabs((prev) => (prev.includes(first) ? prev : [...prev, first]))
+        setActiveFile(first)
+      }
+    }
+  }
+
+  // File and Folder Operations
+  const handleCreateNode = (pathInput, isFolder = false) => {
+    const trimmed = pathInput.trim()
+    if (!trimmed) {
+      setIsCreatingNode(null)
+      setNewPathInput("")
+      return
+    }
+
+    const cleanPath = trimmed.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+    if (!cleanPath) {
+      setIsCreatingNode(null)
+      setNewPathInput("")
+      return
+    }
+
+    if (isFolder) {
+      const keepFile = `${cleanPath}/.keep`
+      ydoc.transact(() => {
+        yfiles.set(keepFile, { name: keepFile, language: "plaintext" })
+      })
+      setExpandedFolders((prev) => new Set([...prev, cleanPath]))
+    } else {
+      const fileLang = getLanguageFromFileName(cleanPath)
+      const starter = LANGUAGE_STARTERS[fileLang] || ""
+
+      ydoc.transact(() => {
+        yfiles.set(cleanPath, { name: cleanPath, language: fileLang })
+        const fileText = ydoc.getText("file:" + cleanPath)
+        if (starter && fileText.length === 0) {
+          fileText.insert(0, starter)
+        }
+      })
+
+      const parts = cleanPath.split("/")
+      if (parts.length > 1) {
+        const parents = []
+        for (let i = 1; i < parts.length; i++) {
+          parents.push(parts.slice(0, i).join("/"))
+        }
+        setExpandedFolders((prev) => new Set([...prev, ...parents]))
+      }
+
+      setOpenTabs((prev) => (prev.includes(cleanPath) ? prev : [...prev, cleanPath]))
+      setActiveFile(cleanPath)
+    }
+
+    setIsCreatingNode(null)
+    setNewPathInput("")
+  }
+
+  const handleDeleteFile = (filePath, event) => {
+    event?.stopPropagation()
+    const keys = Array.from(yfiles.keys())
+    if (keys.length <= 1) {
+      alert("Cannot delete the only file in the workspace.")
+      return
+    }
+
+    if (!confirm(`Delete ${filePath}?`)) {
       return
     }
 
     ydoc.transact(() => {
-      yText.delete(0, yText.length)
-      yText.insert(0, starter)
+      yfiles.delete(filePath)
+    })
+
+    setOpenTabs((prev) => prev.filter((f) => f !== filePath))
+
+    if (activeFile === filePath) {
+      const remaining = keys.filter((f) => f !== filePath && !f.endsWith(".keep"))
+      if (remaining.length > 0) {
+        setActiveFile(remaining[0])
+      }
+    }
+  }
+
+  const handleDeleteFolder = (folderPath, event) => {
+    event?.stopPropagation()
+    if (!confirm(`Delete folder '${folderPath}' and all its files?`)) {
+      return
+    }
+
+    const filesToDelete = Array.from(yfiles.keys()).filter(
+      (f) => f === folderPath || f.startsWith(folderPath + "/")
+    )
+
+    ydoc.transact(() => {
+      filesToDelete.forEach((f) => yfiles.delete(f))
+    })
+
+    setOpenTabs((prev) => prev.filter((f) => !filesToDelete.includes(f)))
+
+    if (filesToDelete.includes(activeFile)) {
+      const remaining = Array.from(yfiles.keys()).filter(
+        (f) => !filesToDelete.includes(f) && !f.endsWith(".keep")
+      )
+      if (remaining.length > 0) {
+        setActiveFile(remaining[0])
+      }
+    }
+  }
+
+  const handleSelectFile = (filePath) => {
+    if (filePath.endsWith(".keep")) return
+    setOpenTabs((prev) => (prev.includes(filePath) ? prev : [...prev, filePath]))
+    setActiveFile(filePath)
+  }
+
+  const handleCloseTab = (fileName, event) => {
+    event?.stopPropagation()
+    const newTabs = openTabs.filter((f) => f !== fileName)
+    setOpenTabs(newTabs)
+    if (activeFile === fileName) {
+      if (newTabs.length > 0) {
+        setActiveFile(newTabs[newTabs.length - 1])
+      } else {
+        setActiveFile("")
+      }
+    }
+  }
+
+  const handleRenameNode = (oldPath, newName, isDirectory = false) => {
+    const trimmed = newName.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+    const oldName = oldPath.split("/").pop()
+    if (!trimmed || trimmed === oldName) {
+      setRenamingNode(null)
+      setRenameInput("")
+      return
+    }
+
+    const parts = oldPath.split("/")
+    parts.pop()
+    const parentPath = parts.join("/")
+    const newPath = parentPath ? `${parentPath}/${trimmed}` : trimmed
+
+    if (isDirectory) {
+      const allFiles = Array.from(yfiles.keys())
+      const matching = allFiles.filter(
+        (f) => f === oldPath || f.startsWith(oldPath + "/")
+      )
+
+      ydoc.transact(() => {
+        matching.forEach((oldFilePath) => {
+          const suffix = oldFilePath.slice(oldPath.length)
+          const targetFilePath = newPath + suffix
+          const content = ydoc.getText("file:" + oldFilePath).toString()
+          const lang = getLanguageFromFileName(targetFilePath)
+
+          yfiles.delete(oldFilePath)
+          yfiles.set(targetFilePath, { name: targetFilePath, language: lang })
+
+          const newYText = ydoc.getText("file:" + targetFilePath)
+          newYText.delete(0, newYText.length)
+          newYText.insert(0, content)
+        })
+      })
+
+      setOpenTabs((prev) =>
+        prev.map((tab) => {
+          if (tab.startsWith(oldPath + "/")) {
+            return newPath + tab.slice(oldPath.length)
+          }
+          return tab
+        })
+      )
+
+      if (activeFile.startsWith(oldPath + "/")) {
+        setActiveFile(newPath + activeFile.slice(oldPath.length))
+      }
+
+      setExpandedFolders((prev) => {
+        const next = new Set()
+        prev.forEach((p) => {
+          if (p === oldPath) {
+            next.add(newPath)
+          } else if (p.startsWith(oldPath + "/")) {
+            next.add(newPath + p.slice(oldPath.length))
+          } else {
+            next.add(p)
+          }
+        })
+        return next
+      })
+    } else {
+      const oldYText = ydoc.getText("file:" + oldPath)
+      const content = oldYText.toString()
+      const newLang = getLanguageFromFileName(newPath)
+
+      ydoc.transact(() => {
+        yfiles.delete(oldPath)
+        yfiles.set(newPath, { name: newPath, language: newLang })
+
+        const newYText = ydoc.getText("file:" + newPath)
+        newYText.delete(0, newYText.length)
+        newYText.insert(0, content)
+      })
+
+      setOpenTabs((prev) =>
+        prev.map((tab) => (tab === oldPath ? newPath : tab))
+      )
+
+      if (activeFile === oldPath) {
+        setActiveFile(newPath)
+      }
+    }
+
+    setRenamingNode(null)
+    setRenameInput("")
+  }
+
+  const toggleFolder = (folderPath, event) => {
+    event?.stopPropagation()
+    setExpandedFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(folderPath)) {
+        next.delete(folderPath)
+      } else {
+        next.add(folderPath)
+      }
+      return next
     })
   }
 
-  const handleJoin =
-    async (event) => {
-      event.preventDefault()
+  /*
+   * ==========================================================================
+   * Global Project Search & Replace Engine (Ctrl+Shift+F)
+   * ==========================================================================
+   */
+  const performSearch = useCallback(() => {
+    if (!searchQuery) {
+      setSearchResults([])
+      setSearchStatus("")
+      return
+    }
 
-      setJoinError("")
-      setJoinLoading(true)
+    try {
+      const flags = searchMatchCase ? "g" : "gi"
+      let pattern = searchQuery
 
-      const form =
-        event.currentTarget
-
-      const name =
-        form.elements.username.value.trim()
-
-      const roomInput =
-        form.elements.room?.value.trim()
-
-      const roomId =
-        roomInput ||
-        room.trim()
-
-      if (!name) {
-        setJoinError(
-          "Please enter a username."
-        )
-
-        setJoinLoading(false)
-        return
+      if (!searchUseRegex) {
+        pattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      }
+      if (searchWholeWord) {
+        pattern = `\\b${pattern}\\b`
       }
 
-      if (!roomId) {
-        setJoinError(
-          "Please enter a room ID."
-        )
+      const fileKeys = Array.from(yfiles.keys())
+      const results = []
 
-        setJoinLoading(false)
-        return
-      }
+      for (const fname of fileKeys) {
+        if (fname.endsWith(".keep") && fileKeys.length > 1) continue
 
-      try {
-        const response =
-          await fetch(
-            `http://localhost:8080/api/rooms/${encodeURIComponent(
-              roomId
-            )}`,
-            {
-              method: "GET",
-              headers: {
-                Accept:
-                  "application/json, text/plain, */*"
-              }
+        // Check include / exclude filters
+        if (searchIncludeFilter.trim()) {
+          const incPatterns = searchIncludeFilter
+            .split(",")
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean)
+          const matched = incPatterns.some((p) => {
+            if (p.startsWith("*.")) return fname.toLowerCase().endsWith(p.slice(1))
+            return fname.toLowerCase().includes(p)
+          })
+          if (!matched) continue
+        }
+
+        if (searchExcludeFilter.trim()) {
+          const excPatterns = searchExcludeFilter
+            .split(",")
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean)
+          const matched = excPatterns.some((p) => {
+            if (p.startsWith("*.")) return fname.toLowerCase().endsWith(p.slice(1))
+            return fname.toLowerCase().includes(p)
+          })
+          if (matched) continue
+        }
+
+        // Retrieve file content
+        let content = ""
+        if (editorRef.current && activeFile === fname) {
+          content = editorRef.current.getValue()
+        } else {
+          content = ydoc.getText("file:" + fname).toString()
+        }
+
+        if (!content) continue
+
+        const lines = content.split("\n")
+        const fileMatches = []
+
+        lines.forEach((lineText, lineIdx) => {
+          const lineNumber = lineIdx + 1
+          let match
+          const lineRegex = new RegExp(pattern, flags)
+          while ((match = lineRegex.exec(lineText)) !== null) {
+            const startCol = match.index + 1
+            const endCol = match.index + match[0].length + 1
+            const previewBefore = lineText.substring(
+              Math.max(0, match.index - 30),
+              match.index
+            )
+            const matchText = match[0]
+            const previewAfter = lineText.substring(
+              match.index + match[0].length,
+              match.index + match[0].length + 40
+            )
+
+            fileMatches.push({
+              id: `${fname}-${lineNumber}-${startCol}-${match.index}`,
+              lineNumber,
+              startCol,
+              endCol,
+              lineText,
+              previewBefore,
+              matchText,
+              previewAfter,
+              indexInLine: match.index,
+              length: match[0].length
+            })
+
+            if (match[0].length === 0) {
+              lineRegex.lastIndex++
             }
-          )
-
-        if (!response.ok) {
-          if (
-            response.status ===
-            404
-          ) {
-            setJoinError(
-              "Room not found. Check the room ID and try again."
-            )
-          } else {
-            setJoinError(
-              "Unable to join the room. Please try again."
-            )
           }
+        })
 
-          return
+        if (fileMatches.length > 0) {
+          results.push({
+            filePath: fname,
+            matches: fileMatches
+          })
         }
-
-        setJoinError("")
-
-        setUsername(name)
-        setRoom(roomId)
-        setDocumentReady(false)
-        setJoined(true)
-
-        const params =
-          new URLSearchParams(
-            window.location.search
-          )
-
-        params.set(
-          "room",
-          roomId
-        )
-
-        params.set(
-          "username",
-          name
-        )
-
-        window.history.pushState(
-          {},
-          "",
-          `?${params.toString()}`
-        )
-      } catch (error) {
-        console.error(
-          "Failed to join room",
-          error
-        )
-
-        setJoinError(
-          "Unable to connect to the server. Please try again."
-        )
-      } finally {
-        setJoinLoading(false)
       }
+
+      setSearchResults(results)
+      const totalMatches = results.reduce((acc, r) => acc + r.matches.length, 0)
+      setSearchStatus(
+        `${totalMatches} result${totalMatches === 1 ? "" : "s"} in ${results.length} file${results.length === 1 ? "" : "s"}`
+      )
+    } catch (err) {
+      setSearchResults([])
+      setSearchStatus(`Invalid search expression: ${err.message}`)
+    }
+  }, [
+    searchQuery,
+    searchMatchCase,
+    searchUseRegex,
+    searchWholeWord,
+    searchIncludeFilter,
+    searchExcludeFilter,
+    yfiles,
+    ydoc,
+    activeFile
+  ])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      performSearch()
+    }, 120)
+    return () => clearTimeout(timer)
+  }, [performSearch])
+
+  const handleSelectSearchMatch = (filePath, match) => {
+    if (!openTabs.includes(filePath)) {
+      setOpenTabs((prev) => [...prev, filePath])
+    }
+    setActiveFile(filePath)
+
+    setTimeout(() => {
+      const editor = editorRef.current
+      const monaco = monacoRef.current
+      if (editor && monaco) {
+        editor.revealLineInCenter(match.lineNumber)
+        editor.setSelection(
+          new monaco.Selection(
+            match.lineNumber,
+            match.startCol,
+            match.lineNumber,
+            match.endCol
+          )
+        )
+        editor.focus()
+      }
+    }, 80)
+  }
+
+  const handleReplaceSingleMatch = (filePath, match) => {
+    const fileYText = ydoc.getText("file:" + filePath)
+    const fullContent = fileYText.toString()
+    const lines = fullContent.split("\n")
+    let globalOffset = 0
+    for (let i = 0; i < match.lineNumber - 1; i++) {
+      globalOffset += lines[i].length + 1
+    }
+    globalOffset += match.indexInLine
+
+    const currentSub = fullContent.substring(globalOffset, globalOffset + match.length)
+    if (currentSub === match.matchText) {
+      ydoc.transact(() => {
+        fileYText.delete(globalOffset, match.length)
+        fileYText.insert(globalOffset, replaceQuery)
+      })
+    }
+    setTimeout(performSearch, 50)
+  }
+
+  const handleReplaceAllInFile = (filePath) => {
+    const fileYText = ydoc.getText("file:" + filePath)
+    const content = fileYText.toString()
+
+    const flags = searchMatchCase ? "g" : "gi"
+    let pattern = searchQuery
+    if (!searchUseRegex) {
+      pattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    }
+    if (searchWholeWord) {
+      pattern = `\\b${pattern}\\b`
     }
 
-  const handleCreateRoom =
-    async (event) => {
-      event.preventDefault()
+    const regex = new RegExp(pattern, flags)
+    const matches = []
+    let m
+    while ((m = regex.exec(content)) !== null) {
+      matches.push({ index: m.index, length: m[0].length })
+      if (m[0].length === 0) regex.lastIndex++
+    }
 
-      setCreateError("")
-      setCreateLoading(true)
+    if (matches.length > 0) {
+      ydoc.transact(() => {
+        for (let i = matches.length - 1; i >= 0; i--) {
+          fileYText.delete(matches[i].index, matches[i].length)
+          fileYText.insert(matches[i].index, replaceQuery)
+        }
+      })
+    }
+    setTimeout(performSearch, 50)
+  }
 
-      const form =
-        event.currentTarget
+  const handleReplaceAll = () => {
+    if (!searchQuery) return
 
-      const name =
-        form.elements.username.value.trim()
+    const flags = searchMatchCase ? "g" : "gi"
+    let pattern = searchQuery
+    if (!searchUseRegex) {
+      pattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    }
+    if (searchWholeWord) {
+      pattern = `\\b${pattern}\\b`
+    }
 
-      if (!name) {
-        setCreateError(
-          "Please enter a username."
-        )
+    const fileKeys = Array.from(yfiles.keys())
 
-        setCreateLoading(false)
+    ydoc.transact(() => {
+      for (const fname of fileKeys) {
+        if (fname.endsWith(".keep") && fileKeys.length > 1) continue
+        const fileYText = ydoc.getText("file:" + fname)
+        const content = fileYText.toString()
+        const matches = []
+        let m
+        const fileRegex = new RegExp(pattern, flags)
+        while ((m = fileRegex.exec(content)) !== null) {
+          matches.push({ index: m.index, length: m[0].length })
+          if (m[0].length === 0) fileRegex.lastIndex++
+        }
+        if (matches.length > 0) {
+          for (let i = matches.length - 1; i >= 0; i--) {
+            fileYText.delete(matches[i].index, matches[i].length)
+            fileYText.insert(matches[i].index, replaceQuery)
+          }
+        }
+      }
+    })
+    setTimeout(performSearch, 50)
+  }
+
+  const handleJoin = async (event) => {
+    event.preventDefault()
+    setJoinError("")
+    setJoinLoading(true)
+
+    const form = event.currentTarget
+    const name = form.elements.username.value.trim()
+    const roomInput = form.elements.room?.value.trim()
+    const roomId = roomInput || room.trim()
+
+    if (!name) {
+      setJoinError("Please enter a username.")
+      setJoinLoading(false)
+      return
+    }
+
+    if (!roomId) {
+      setJoinError("Please enter a room ID.")
+      setJoinLoading(false)
+      return
+    }
+
+    try {
+      const response = await fetch(
+        `http://localhost:8080/api/rooms/${encodeURIComponent(roomId)}`,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*"
+          }
+        }
+      )
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          setJoinError("Room not found. Check the room ID and try again.")
+        } else {
+          setJoinError("Unable to join the room. Please try again.")
+        }
         return
       }
 
-      try {
-        const response =
-          await fetch(
-            "http://localhost:8080/api/rooms",
-            {
-              method: "POST"
-            }
-          )
-
-        if (!response.ok) {
-          throw new Error(
-            `Failed to create room: ${response.status}`
-          )
-        }
-
-        const roomId =
-          await response.text()
-
-        if (!roomId.trim()) {
-          throw new Error(
-            "Server returned an empty room ID"
-          )
-        }
-
-        const cleanRoomId =
-          roomId.trim()
-
-        setCreateError("")
-
-        setUsername(name)
-        setRoom(cleanRoomId)
-        setDocumentReady(false)
-        setJoined(true)
-
-        const params =
-          new URLSearchParams(
-            window.location.search
-          )
-
-        params.set(
-          "room",
-          cleanRoomId
-        )
-
-        params.set(
-          "username",
-          name
-        )
-
-        window.history.pushState(
-          {},
-          "",
-          `?${params.toString()}`
-        )
-      } catch (error) {
-        console.error(
-          "Failed to create room",
-          error
-        )
-
-        setCreateError(
-          "Unable to create room. Please try again."
-        )
-      } finally {
-        setCreateLoading(false)
-      }
-    }
-
-  const handleShareRoom =
-    async () => {
-      try {
-        await navigator.clipboard.writeText(
-          window.location.href
-        )
-
-        setShareMessage(
-          "Room link copied"
-        )
-
-        setTimeout(() => {
-          setShareMessage("")
-        }, 2000)
-      } catch (error) {
-        console.error(
-          "Failed to copy room link",
-          error
-        )
-
-        setShareMessage(
-          "Failed to copy link"
-        )
-      }
-    }
-
-  const handleLeaveRoom =
-    () => {
-      setJoined(false)
-      setUsername("")
-      setUsers([])
-      setShareMessage("")
-      setDocumentReady(false)
       setJoinError("")
-      setCreateError("")
-      setTerminalOpen(false)
-      setTerminalMaximized(false)
-      setRoom("")
+      setUsername(name)
+      setRoom(roomId)
+      setDocumentReady(false)
+      setJoined(true)
 
-      window.history.pushState(
-        {},
-        "",
-        window.location.pathname
+      const params = new URLSearchParams(window.location.search)
+      params.set("room", roomId)
+      params.set("username", name)
+      window.history.pushState({}, "", `?${params.toString()}`)
+    } catch (error) {
+      console.error("Failed to join room", error)
+      setJoinError("Unable to connect to the server. Please try again.")
+    } finally {
+      setJoinLoading(false)
+    }
+  }
+
+  const handleCreateRoom = async (event) => {
+    event.preventDefault()
+    setCreateError("")
+    setCreateLoading(true)
+
+    const form = event.currentTarget
+    const name = form.elements.username.value.trim()
+
+    if (!name) {
+      setCreateError("Please enter a username.")
+      setCreateLoading(false)
+      return
+    }
+
+    try {
+      const response = await fetch("http://localhost:8080/api/rooms", {
+        method: "POST"
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to create room: ${response.status}`)
+      }
+
+      const roomId = await response.text()
+      if (!roomId.trim()) {
+        throw new Error("Server returned an empty room ID")
+      }
+
+      const cleanRoomId = roomId.trim()
+      setCreateError("")
+      setUsername(name)
+      setRoom(cleanRoomId)
+      setDocumentReady(false)
+      setJoined(true)
+
+      const params = new URLSearchParams(window.location.search)
+      params.set("room", cleanRoomId)
+      params.set("username", name)
+      window.history.pushState({}, "", `?${params.toString()}`)
+    } catch (error) {
+      console.error("Failed to create room", error)
+      setCreateError("Unable to create room. Please try again.")
+    } finally {
+      setCreateLoading(false)
+    }
+  }
+
+  const handleShareRoom = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      setShareMessage("Room link copied")
+      setTimeout(() => {
+        setShareMessage("")
+      }, 2000)
+    } catch (error) {
+      console.error("Failed to copy room link", error)
+      setShareMessage("Failed to copy link")
+    }
+  }
+
+  const handleLeaveRoom = () => {
+    setJoined(false)
+    setUsername("")
+    setUsers([])
+    setShareMessage("")
+    setDocumentReady(false)
+    setJoinError("")
+    setCreateError("")
+    setTerminalOpen(false)
+    setTerminalMaximized(false)
+    setPreviewOpen(false)
+    setRoom("")
+    window.history.pushState({}, "", window.location.pathname)
+  }
+
+  const errorsCount = diagnostics.filter((d) => d.severity === SEVERITY.ERROR).length
+  const warningsCount = diagnostics.filter((d) => d.severity === SEVERITY.WARNING).length
+
+  const visibleFilePaths = fileList.filter((f) => !f.endsWith(".keep") || fileList.length === 1)
+  const fileTree = buildTreeFromPaths(fileList)
+
+  /**
+   * Recursive tree item renderer for VS Code style directory tree.
+   */
+  const renderTreeNode = (node, depth = 0) => {
+    if (node.isDirectory) {
+      const isExpanded = expandedFolders.has(node.path)
+      const isRenaming = renamingNode?.path === node.path
+
+      return (
+        <div key={node.path} className="flex flex-col">
+          <div
+            onClick={(e) => {
+              if (!isRenaming) toggleFolder(node.path, e)
+            }}
+            style={{ paddingLeft: `${depth * 14 + 10}px` }}
+            className="tree-node group"
+          >
+            <div className="tree-node-label">
+              <svg
+                className={`w-3 h-3 text-[#8b949e] transition-transform duration-150 flex-shrink-0 ${isExpanded ? "rotate-90" : ""}`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+              <svg
+                className={`w-3.5 h-3.5 flex-shrink-0 ${isExpanded ? "text-[#58a6ff]" : "text-[#8b949e]"}`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                {isExpanded ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 19h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                )}
+              </svg>
+              {isRenaming ? (
+                <input
+                  type="text"
+                  autoFocus
+                  value={renameInput}
+                  onChange={(e) => setRenameInput(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleRenameNode(node.path, renameInput, true)
+                    }
+                    if (e.key === "Escape") {
+                      setRenamingNode(null)
+                      setRenameInput("")
+                    }
+                  }}
+                  onBlur={() => {
+                    if (renameInput.trim()) {
+                      handleRenameNode(node.path, renameInput, true)
+                    } else {
+                      setRenamingNode(null)
+                    }
+                  }}
+                  className="tree-inline-input"
+                />
+              ) : (
+                <span className="font-semibold text-xs text-[#c9d1d9] truncate">{node.name}</span>
+              )}
+            </div>
+
+            {!isRenaming && (
+              <div className="tree-node-actions">
+                <button
+                  type="button"
+                  title={`Rename ${node.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setRenamingNode({ path: node.path, name: node.name, isDirectory: true })
+                    setRenameInput(node.name)
+                  }}
+                  className="tree-action-btn"
+                >
+                  <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  title="New File Inside Folder"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setIsCreatingNode({ type: "file", parentPath: node.path })
+                    setExpandedFolders((prev) => new Set([...prev, node.path]))
+                  }}
+                  className="tree-action-btn"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  title={`Delete ${node.name}`}
+                  onClick={(e) => handleDeleteFolder(node.path, e)}
+                  className="tree-action-btn"
+                >
+                  ×
+                </button>
+              </div>
+            )}
+          </div>
+
+          {isExpanded && (
+            <div className="flex flex-col">
+              {isCreatingNode && isCreatingNode.parentPath === node.path && (
+                <div style={{ paddingLeft: `${(depth + 1) * 14 + 10}px` }} className="tree-input-wrapper">
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder={isCreatingNode.type === "folder" ? "folder_name" : "filename.ext"}
+                    value={newPathInput}
+                    onChange={(e) => setNewPathInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const full = `${node.path}/${newPathInput}`
+                        handleCreateNode(full, isCreatingNode.type === "folder")
+                      }
+                      if (e.key === "Escape") {
+                        setIsCreatingNode(null)
+                        setNewPathInput("")
+                      }
+                    }}
+                    onBlur={() => {
+                      if (newPathInput.trim()) {
+                        handleCreateNode(`${node.path}/${newPathInput}`, isCreatingNode.type === "folder")
+                      } else {
+                        setIsCreatingNode(null)
+                      }
+                    }}
+                    className="tree-inline-input"
+                  />
+                </div>
+              )}
+              {node.children.map((child) => renderTreeNode(child, depth + 1))}
+            </div>
+          )}
+        </div>
       )
     }
 
-  const errorsCount = diagnostics.filter(
-    (d) => d.severity === SEVERITY.ERROR
-  ).length
+    if (node.name === ".keep") return null
 
-  const warningsCount = diagnostics.filter(
-    (d) => d.severity === SEVERITY.WARNING
-  ).length
+    const isActive = activeFile === node.path
+    const isRenaming = renamingNode?.path === node.path
+
+    return (
+      <div
+        key={node.path}
+        onClick={() => {
+          if (!isRenaming) handleSelectFile(node.path)
+        }}
+        style={{ paddingLeft: `${depth * 14 + 16}px` }}
+        className={`tree-node group ${isActive ? "active" : ""}`}
+      >
+        <div className="tree-node-label">
+          <span className="text-xs">{getFileIcon(node.name)}</span>
+          {isRenaming ? (
+            <input
+              type="text"
+              autoFocus
+              value={renameInput}
+              onChange={(e) => setRenameInput(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  handleRenameNode(node.path, renameInput, false)
+                }
+                if (e.key === "Escape") {
+                  setRenamingNode(null)
+                  setRenameInput("")
+                }
+              }}
+              onBlur={() => {
+                if (renameInput.trim()) {
+                  handleRenameNode(node.path, renameInput, false)
+                } else {
+                  setRenamingNode(null)
+                }
+              }}
+              className="tree-inline-input"
+            />
+          ) : (
+            <span className="truncate">{node.name}</span>
+          )}
+        </div>
+
+        {!isRenaming && (
+          <div className="tree-node-actions">
+            <button
+              type="button"
+              title={`Rename ${node.name}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                setRenamingNode({ path: node.path, name: node.name, isDirectory: false })
+                setRenameInput(node.name)
+              }}
+              className="tree-action-btn"
+            >
+              <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
+            </button>
+            {visibleFilePaths.length > 1 && (
+              <button
+                type="button"
+                title={`Delete ${node.name}`}
+                onClick={(e) => handleDeleteFile(node.path, e)}
+                className="tree-action-btn"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   /*
-   * Join/create screen.
+   * Join / Create Screen
    */
   if (!joined) {
-    const hasRoomFromUrl =
-      Boolean(room.trim())
+    const hasRoomFromUrl = Boolean(room.trim())
 
     return (
       <main className="h-screen w-full bg-[#090d13] flex items-center justify-center p-4">
         <div className="w-full max-w-sm bg-[#161b22] border border-[#30363d] rounded-lg p-6 shadow-xl">
-
           <div className="flex items-center justify-center gap-2 mb-2">
             <svg className="w-6 h-6 text-[#58a6ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
             </svg>
-            <h1 className="text-xl font-bold text-[#f0f6fc]">
-              SyncStream
-            </h1>
+            <h1 className="text-xl font-bold text-[#f0f6fc]">SyncStream</h1>
           </div>
 
           <p className="text-[#8b949e] text-center mb-6 text-xs">
-            Collaborative IDE & Code Runner
+            Real-time collaborative code editor & workspace
           </p>
 
           {hasRoomFromUrl ? (
-            <form
-              onSubmit={handleJoin}
-              className="flex flex-col gap-3"
-            >
+            <form onSubmit={handleJoin} className="flex flex-col gap-3">
               <div className="p-2.5 rounded bg-[#0d1117] border border-[#30363d] text-[#8b949e] text-xs">
                 Room: <span className="text-[#58a6ff] font-mono font-medium">{room}</span>
               </div>
@@ -1674,7 +2451,7 @@ function App() {
                 type="text"
                 name="username"
                 placeholder="Username"
-                className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-xs outline-none border border-[#30363d] focus:border-[#58a6ff]"
+                className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-sm outline-none border border-[#30363d] focus:border-[#58a6ff]"
                 required
               />
 
@@ -1689,22 +2466,17 @@ function App() {
                 disabled={joinLoading}
                 className="p-2.5 rounded bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-semibold disabled:opacity-50 transition"
               >
-                {joinLoading
-                  ? "Joining..."
-                  : "Join Room"}
+                {joinLoading ? "Joining..." : "Join Room"}
               </button>
             </form>
           ) : (
             <>
-              <form
-                onSubmit={handleCreateRoom}
-                className="flex flex-col gap-3"
-              >
+              <form onSubmit={handleCreateRoom} className="flex flex-col gap-3">
                 <input
                   type="text"
                   name="username"
                   placeholder="Username"
-                  className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-xs outline-none border border-[#30363d] focus:border-[#58a6ff]"
+                  className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-sm outline-none border border-[#30363d] focus:border-[#58a6ff]"
                   required
                 />
 
@@ -1719,9 +2491,7 @@ function App() {
                   disabled={createLoading}
                   className="p-2.5 rounded bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-semibold disabled:opacity-50 transition"
                 >
-                  {createLoading
-                    ? "Creating Room..."
-                    : "Create New Room"}
+                  {createLoading ? "Creating Room..." : "Create New Room"}
                 </button>
               </form>
 
@@ -1733,15 +2503,12 @@ function App() {
                 <div className="h-px bg-[#30363d] flex-1" />
               </div>
 
-              <form
-                onSubmit={handleJoin}
-                className="flex flex-col gap-3"
-              >
+              <form onSubmit={handleJoin} className="flex flex-col gap-3">
                 <input
                   type="text"
                   name="room"
                   placeholder="Room ID"
-                  className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-xs outline-none border border-[#30363d] focus:border-[#58a6ff] font-mono"
+                  className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-sm outline-none border border-[#30363d] focus:border-[#58a6ff] font-mono"
                   required
                 />
 
@@ -1749,7 +2516,7 @@ function App() {
                   type="text"
                   name="username"
                   placeholder="Username"
-                  className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-xs outline-none border border-[#30363d] focus:border-[#58a6ff]"
+                  className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-sm outline-none border border-[#30363d] focus:border-[#58a6ff]"
                   required
                 />
 
@@ -1764,9 +2531,7 @@ function App() {
                   disabled={joinLoading}
                   className="p-2.5 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs font-semibold disabled:opacity-50 border border-[#30363d] transition"
                 >
-                  {joinLoading
-                    ? "Joining..."
-                    : "Join Room"}
+                  {joinLoading ? "Joining..." : "Join Room"}
                 </button>
               </form>
             </>
@@ -1778,19 +2543,29 @@ function App() {
 
   return (
     <main className="h-screen w-full bg-[#0d1117] flex flex-col overflow-hidden">
+      {/* Hidden File Input for Importing ZIP / Project */}
+      <input
+        type="file"
+        ref={importFileInputRef}
+        onChange={(e) => {
+          if (e.target.files && e.target.files[0]) {
+            handleImportZipFile(e.target.files[0])
+            e.target.value = ""
+          }
+        }}
+        accept=".zip"
+        style={{ display: "none" }}
+      />
 
       {/* Top Navbar */}
       <header className="h-11 min-h-[44px] bg-[#161b22] border-b border-[#30363d] px-3 flex items-center justify-between select-none">
-
         {/* Left: Brand & Room ID */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <svg className="w-5 h-5 text-[#58a6ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
             </svg>
-            <span className="text-sm font-semibold text-[#f0f6fc]">
-              SyncStream
-            </span>
+            <span className="text-sm font-semibold text-[#f0f6fc]">SyncStream</span>
           </div>
 
           <div
@@ -1803,14 +2578,20 @@ function App() {
           </div>
         </div>
 
-        {/* Center: Language & Run Actions */}
+        {/* Center: Language, Preview & Run Actions */}
         <div className="flex items-center gap-2">
-
           <select
             id="language"
             value={language}
             onChange={(event) => {
-              ymetadata.set("language", event.target.value)
+              const newLang = event.target.value
+              setLanguage(newLang)
+              if (editorRef.current && monacoRef.current) {
+                const model = editorRef.current.getModel()
+                if (model) {
+                  monacoRef.current.editor.setModelLanguage(model, newLang)
+                }
+              }
             }}
             className="bg-[#0d1117] text-[#c9d1d9] text-xs rounded px-2.5 py-1 outline-none border border-[#30363d] hover:border-[#8b949e] focus:border-[#58a6ff] font-sans"
           >
@@ -1823,6 +2604,10 @@ function App() {
             <option value="go">Go</option>
             <option value="rust">Rust</option>
             <option value="csharp">C#</option>
+            <option value="ruby">Ruby</option>
+            <option value="php">PHP</option>
+            <option value="kotlin">Kotlin</option>
+            <option value="swift">Swift</option>
             <option value="html">HTML</option>
             <option value="css">CSS</option>
             <option value="json">JSON</option>
@@ -1832,17 +2617,36 @@ function App() {
           <button
             type="button"
             onClick={handleInsertTemplate}
-            title="Insert boilerplate template for selected language"
+            title="Insert boilerplate template for active file"
             className="px-2 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition"
           >
             Template
           </button>
 
+          {isWebContext && (
+            <button
+              type="button"
+              onClick={() => setPreviewOpen((c) => !c)}
+              title="Toggle Live Web Preview"
+              className={`px-2.5 py-1 rounded text-xs border transition flex items-center gap-1.5 ${
+                previewOpen
+                  ? "bg-[#1f6feb] text-white border-[#388bfd]"
+                  : "bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] border-[#30363d]"
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              <span>Preview</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleRunCode}
             disabled={isRunning}
-            title="Run Code (Ctrl+Enter / F5)"
+            title="Run Project (Ctrl+Enter / F5)"
             className="btn-primary-run"
           >
             {isRunning ? (
@@ -1862,23 +2666,17 @@ function App() {
               </>
             )}
           </button>
-
         </div>
 
         {/* Right: User Presence, Share & Leave */}
         <div className="flex items-center gap-2">
-
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#0d1117] border border-[#30363d] text-[11px]">
             <span
               className={`w-2 h-2 rounded-full ${
-                connectionState === "CONNECTED"
-                  ? "bg-[#3fb950]"
-                  : "bg-[#d29922]"
+                connectionState === "CONNECTED" ? "bg-[#3fb950]" : "bg-[#d29922]"
               }`}
             />
-            <span className="text-[#8b949e]">
-              {username}
-            </span>
+            <span className="text-[#8b949e]">{username}</span>
           </div>
 
           <button
@@ -1892,9 +2690,17 @@ function App() {
           <button
             type="button"
             onClick={() => setTerminalOpen((c) => !c)}
-            className="px-2.5 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition"
+            className={`px-2.5 py-1 rounded text-xs border transition flex items-center gap-1.5 ${
+              terminalOpen
+                ? "bg-[#21262d] text-[#58a6ff] border-[#388bfd]"
+                : "bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] border-[#30363d]"
+            }`}
+            title="Toggle Terminal Panel (Ctrl+`)"
           >
-            {terminalOpen ? "Hide Console" : "Console"}
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 17l6-6-6-6m8 14h8" />
+            </svg>
+            <span>Terminal</span>
           </button>
 
           <button
@@ -1904,7 +2710,6 @@ function App() {
           >
             Leave
           </button>
-
         </div>
       </header>
 
@@ -1914,44 +2719,603 @@ function App() {
         </div>
       )}
 
-      {/* Main Body */}
+      {/* Main Body with VS Code Layout */}
       <div className="flex flex-1 min-h-0">
+        {/* 1. VS Code Left Activity Bar Rail */}
+        <nav className="vscode-activity-bar">
+          <div className="activity-bar-group">
+            <button
+              type="button"
+              onClick={() => {
+                if (activeActivityTab === "explorer" && sidebarOpen) {
+                  setSidebarOpen(false)
+                } else {
+                  setActiveActivityTab("explorer")
+                  setSidebarOpen(true)
+                }
+              }}
+              title="Explorer (Files & Folders)"
+              className={`activity-bar-btn ${sidebarOpen && activeActivityTab === "explorer" ? "active" : ""}`}
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              </svg>
+            </button>
 
-        {/* Left Sidebar: Collaborators */}
-        <aside className="w-48 bg-[#0d1117] border-r border-[#30363d] flex flex-col select-none">
-          <div className="px-3 py-2 border-b border-[#21262d] flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8b949e]">
-              Collaborators ({users.length})
-            </span>
+            <button
+              type="button"
+              onClick={() => {
+                if (activeActivityTab === "search" && sidebarOpen) {
+                  setSidebarOpen(false)
+                } else {
+                  setActiveActivityTab("search")
+                  setSidebarOpen(true)
+                  setTimeout(() => {
+                    searchInputRef.current?.focus()
+                  }, 50)
+                }
+              }}
+              title="Search & Replace (Ctrl+Shift+F)"
+              className={`activity-bar-btn ${sidebarOpen && activeActivityTab === "search" ? "active" : ""}`}
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (activeActivityTab === "chat" && sidebarOpen) {
+                  setSidebarOpen(false)
+                } else {
+                  setActiveActivityTab("chat")
+                  setSidebarOpen(true)
+                }
+              }}
+              title="Room Chat"
+              className={`activity-bar-btn ${sidebarOpen && activeActivityTab === "chat" ? "active" : ""}`}
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              {unreadChatCount > 0 && activeActivityTab !== "chat" && (
+                <span className="activity-bar-badge">{unreadChatCount}</span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (activeActivityTab === "collaborators" && sidebarOpen) {
+                  setSidebarOpen(false)
+                } else {
+                  setActiveActivityTab("collaborators")
+                  setSidebarOpen(true)
+                }
+              }}
+              title="Collaborators"
+              className={`activity-bar-btn ${sidebarOpen && activeActivityTab === "collaborators" ? "active" : ""}`}
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+            </button>
           </div>
 
-          <div className="p-2 flex-1 overflow-y-auto flex flex-col gap-0.5">
-            {users.map((user) => (
-              <div
-                key={user.clientId}
-                className="sidebar-user-item"
+          {isWebContext && (
+            <div className="activity-bar-group">
+              <button
+                type="button"
+                onClick={() => setPreviewOpen((c) => !c)}
+                title="Toggle Web Preview"
+                className={`activity-bar-btn ${previewOpen ? "active" : ""}`}
               >
-                <span className="w-2 h-2 rounded-full bg-[#3fb950] flex-shrink-0" />
-                <span className="truncate flex-1 text-xs">
-                  {user.username}
-                </span>
-                {user.username === username && (
-                  <span className="text-[10px] text-[#8b949e]">
-                    You
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+              </button>
+            </div>
+          )}
+        </nav>
+
+        {/* 2. VS Code Primary Sidebar */}
+        {sidebarOpen && (
+          <aside className="vscode-sidebar" style={{ width: `${sidebarWidth}px` }}>
+            <div
+              className={`sidebar-resize-handle ${isResizingSidebar ? "resizing" : ""}`}
+              onMouseDown={handleStartSidebarResize}
+              title="Drag to resize sidebar"
+            />
+            {/* View 1: Explorer (Files & Folders) */}
+            {activeActivityTab === "explorer" && (
+              <>
+                <div className="sidebar-title-header">
+                  <span>Explorer</span>
+                  <div className="sidebar-action-icons">
+                    <button
+                      type="button"
+                      title="New File"
+                      onClick={() => setIsCreatingNode({ type: "file", parentPath: "" })}
+                      className="sidebar-icon-btn"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      title="New Folder"
+                      onClick={() => setIsCreatingNode({ type: "folder", parentPath: "" })}
+                      className="sidebar-icon-btn"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      title="Import Project (ZIP)"
+                      onClick={() => importFileInputRef.current?.click()}
+                      className="sidebar-icon-btn"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      title="Export Project (ZIP)"
+                      onClick={handleExportZip}
+                      className="sidebar-icon-btn"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      title="Collapse All Folders"
+                      onClick={() => setExpandedFolders(new Set())}
+                      className="sidebar-icon-btn"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7-7-7 7" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="tree-section-header">
+                  <span className="uppercase text-[10px] tracking-wider">
+                    ▼ {room ? room.toUpperCase() : "WORKSPACE"}
                   </span>
+                  <span className="text-[10px] text-[#8b949e]">({visibleFilePaths.length})</span>
+                </div>
+
+                <div
+                  className="tree-container"
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    setIsDraggingOver(true)
+                  }}
+                  onDragLeave={() => setIsDraggingOver(false)}
+                  onDrop={handleDrop}
+                >
+                  {isDraggingOver && (
+                    <div className="explorer-drop-zone">
+                      <span className="text-xl">📥</span>
+                      <span>Drop files or ZIP to import</span>
+                    </div>
+                  )}
+
+                  {isCreatingNode && isCreatingNode.parentPath === "" && (
+                    <div className="tree-input-wrapper">
+                      <input
+                        type="text"
+                        autoFocus
+                        placeholder={isCreatingNode.type === "folder" ? "folder_name" : "filename.ext"}
+                        value={newPathInput}
+                        onChange={(e) => setNewPathInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            handleCreateNode(newPathInput, isCreatingNode.type === "folder")
+                          }
+                          if (e.key === "Escape") {
+                            setIsCreatingNode(null)
+                            setNewPathInput("")
+                          }
+                        }}
+                        onBlur={() => {
+                          if (newPathInput.trim()) {
+                            handleCreateNode(newPathInput, isCreatingNode.type === "folder")
+                          } else {
+                            setIsCreatingNode(null)
+                          }
+                        }}
+                        className="tree-inline-input"
+                      />
+                    </div>
+                  )}
+
+                  {fileTree.map((child) => renderTreeNode(child, 0))}
+                </div>
+              </>
+            )}
+
+            {/* View 2: Global Search & Replace (Ctrl+Shift+F) */}
+            {activeActivityTab === "search" && (
+              <div className="sidebar-search-container">
+                <div className="sidebar-title-header">
+                  <span>Search</span>
+                  <div className="sidebar-action-icons">
+                    <button
+                      type="button"
+                      title="Refresh Search"
+                      onClick={performSearch}
+                      className="sidebar-icon-btn"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      title="Clear Search"
+                      onClick={() => {
+                        setSearchQuery("")
+                        setSearchResults([])
+                        setSearchStatus("")
+                        searchInputRef.current?.focus()
+                      }}
+                      className="sidebar-icon-btn"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      title="Collapse All Results"
+                      onClick={() => {
+                        setCollapsedSearchFiles(new Set(searchResults.map((r) => r.filePath)))
+                      }}
+                      className="sidebar-icon-btn"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7-7-7 7" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="sidebar-search-inputs">
+                  {/* Search Input Box with Options */}
+                  <div className="search-input-row">
+                    <button
+                      type="button"
+                      className="search-drawer-toggle"
+                      onClick={() => setShowReplaceDrawer((p) => !p)}
+                      title="Toggle Replace Drawer"
+                    >
+                      <svg
+                        className={`w-3 h-3 text-[#8b949e] transition-transform duration-100 ${showReplaceDrawer ? "rotate-90" : ""}`}
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                    <div className="search-input-wrapper">
+                      <input
+                        ref={searchInputRef}
+                        type="text"
+                        placeholder="Search (e.g. function, class)..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            performSearch()
+                          }
+                        }}
+                        className="sidebar-search-input"
+                      />
+                      <div className="search-option-toggles">
+                        <button
+                          type="button"
+                          className={`search-option-btn ${searchMatchCase ? "active" : ""}`}
+                          onClick={() => setSearchMatchCase((c) => !c)}
+                          title="Match Case (Aa)"
+                        >
+                          Aa
+                        </button>
+                        <button
+                          type="button"
+                          className={`search-option-btn ${searchWholeWord ? "active" : ""}`}
+                          onClick={() => setSearchWholeWord((w) => !w)}
+                          title="Match Whole Word (\b)"
+                        >
+                          {"\\b"}
+                        </button>
+                        <button
+                          type="button"
+                          className={`search-option-btn ${searchUseRegex ? "active" : ""}`}
+                          onClick={() => setSearchUseRegex((r) => !r)}
+                          title="Use Regular Expression (.*)"
+                        >
+                          .*
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Replace Input Box */}
+                  {showReplaceDrawer && (
+                    <div className="search-input-row">
+                      <div className="w-[18px] flex-shrink-0" />
+                      <div className="search-input-wrapper">
+                        <input
+                          type="text"
+                          placeholder="Replace..."
+                          value={replaceQuery}
+                          onChange={(e) => setReplaceQuery(e.target.value)}
+                          className="sidebar-search-input"
+                        />
+                        <button
+                          type="button"
+                          className="search-replace-all-btn"
+                          onClick={handleReplaceAll}
+                          title="Replace All across Workspace"
+                          disabled={!searchQuery || searchResults.length === 0}
+                        >
+                          Replace All
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Filter Include / Exclude */}
+                  <div className="pt-1">
+                    <details className="text-[11px] text-[#8b949e] select-none">
+                      <summary className="cursor-pointer hover:text-[#c9d1d9] py-0.5">files to include / exclude</summary>
+                      <div className="flex flex-col gap-1.5 pt-1.5 pb-0.5">
+                        <input
+                          type="text"
+                          placeholder="include e.g. *.js, *.css"
+                          value={searchIncludeFilter}
+                          onChange={(e) => setSearchIncludeFilter(e.target.value)}
+                          className="sidebar-filter-input"
+                          title="Files to include"
+                        />
+                        <input
+                          type="text"
+                          placeholder="exclude e.g. *.keep"
+                          value={searchExcludeFilter}
+                          onChange={(e) => setSearchExcludeFilter(e.target.value)}
+                          className="sidebar-filter-input"
+                          title="Files to exclude"
+                        />
+                      </div>
+                    </details>
+                  </div>
+                </div>
+
+                {/* Search Stats / Status */}
+                {searchStatus && (
+                  <div className="search-status-bar">
+                    <span>{searchStatus}</span>
+                  </div>
                 )}
+
+                {/* Search Results Tree */}
+                <div className="search-results-list">
+                  {searchQuery && searchResults.length === 0 && (
+                    <div className="p-4 text-center text-[#8b949e] text-xs">
+                      No results found for &ldquo;{searchQuery}&rdquo;.
+                    </div>
+                  )}
+
+                  {searchResults.map((fileResult) => {
+                    const isCollapsed = collapsedSearchFiles.has(fileResult.filePath)
+                    return (
+                      <div key={fileResult.filePath} className="search-file-group">
+                        <div
+                          className="search-file-header"
+                          onClick={() => {
+                            setCollapsedSearchFiles((prev) => {
+                              const next = new Set(prev)
+                              if (next.has(fileResult.filePath)) {
+                                next.delete(fileResult.filePath)
+                              } else {
+                                next.add(fileResult.filePath)
+                              }
+                              return next
+                            })
+                          }}
+                        >
+                          <div className="flex items-center gap-1.5 truncate">
+                            <svg
+                              className={`w-3 h-3 text-[#8b949e] transition-transform duration-100 flex-shrink-0 ${isCollapsed ? "" : "rotate-90"}`}
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                            </svg>
+                            <span className="text-xs">{getFileIcon(fileResult.filePath)}</span>
+                            <span className="search-file-name truncate">
+                              {fileResult.filePath}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {showReplaceDrawer && (
+                              <button
+                                type="button"
+                                title={`Replace all in ${fileResult.filePath}`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleReplaceAllInFile(fileResult.filePath)
+                                }}
+                                className="search-inline-replace-btn"
+                              >
+                                Replace
+                              </button>
+                            )}
+                            <span className="search-count-badge">
+                              {fileResult.matches.length}
+                            </span>
+                          </div>
+                        </div>
+
+                        {!isCollapsed && (
+                          <div className="search-file-matches">
+                            {fileResult.matches.map((match) => (
+                              <div
+                                key={match.id}
+                                className="search-match-item"
+                                onClick={() => handleSelectSearchMatch(fileResult.filePath, match)}
+                              >
+                                <span className="search-match-line">
+                                  {match.lineNumber}
+                                </span>
+                                <span className="search-match-preview truncate">
+                                  <span>{match.previewBefore}</span>
+                                  <mark className="search-match-highlight">{match.matchText}</mark>
+                                  <span>{match.previewAfter}</span>
+                                </span>
+                                  {showReplaceDrawer && (
+                                    <button
+                                      type="button"
+                                      title="Replace this match"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleReplaceSingleMatch(fileResult.filePath, match)
+                                      }}
+                                      className="search-single-replace-btn"
+                                    >
+                                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                                      </svg>
+                                    </button>
+                                  )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
-            ))}
-          </div>
+            )}
 
-          <div className="p-2 border-t border-[#21262d] text-[10px] text-[#8b949e] text-center">
-            Shortcut: <kbd className="px-1 py-0.5 bg-[#161b22] text-[#c9d1d9] rounded border border-[#30363d] font-mono">Ctrl+Enter</kbd>
-          </div>
-        </aside>
+            {/* View 3: Room Chat (Full Height in Sidebar - Never cut by dock!) */}
+            {activeActivityTab === "chat" && (
+              <div className="sidebar-chat-container">
+                <div className="sidebar-title-header">
+                  <span>Room Chat</span>
+                  <span className="text-[10px] text-[#8b949e]">({chatMessages.length})</span>
+                </div>
 
-        {/* Center Code Area */}
+                <div className="sidebar-chat-messages">
+                  {chatMessages.length === 0 ? (
+                    <div className="p-4 text-center text-[#8b949e] text-xs">
+                      No messages yet. Chat live with room collaborators!
+                    </div>
+                  ) : (
+                    chatMessages.map((msg) => {
+                      const isMine = msg.sender === username
+                      const timeStr = new Date(msg.timestamp).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })
+                      return (
+                        <div
+                          key={msg.id}
+                          className={`sidebar-chat-bubble ${isMine ? "mine" : "peer"}`}
+                        >
+                          <div className="sidebar-chat-sender">
+                            <span
+                              className={
+                                isMine
+                                  ? "text-[#58a6ff] font-semibold"
+                                  : "text-[#7ee787] font-semibold"
+                              }
+                            >
+                              {isMine ? "You" : msg.sender}
+                            </span>
+                            <span>{timeStr}</span>
+                          </div>
+                          <div>{msg.text}</div>
+                        </div>
+                      )
+                    })
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+
+                <form onSubmit={handleSendChat} className="sidebar-chat-form">
+                  <input
+                    type="text"
+                    placeholder="Type message..."
+                    value={chatInputText}
+                    onChange={(e) => setChatInputText(e.target.value)}
+                    className="sidebar-chat-input"
+                  />
+                  <button type="submit" className="sidebar-chat-send">
+                    Send
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {/* View 3: Collaborators */}
+            {activeActivityTab === "collaborators" && (
+              <>
+                <div className="sidebar-title-header">
+                  <span>Collaborators</span>
+                  <span className="text-[10px] text-[#8b949e]">({users.length})</span>
+                </div>
+
+                <div className="p-2 flex-1 overflow-y-auto flex flex-col gap-1">
+                  {users.map((user) => (
+                    <div
+                      key={user.clientId}
+                      className="flex items-center gap-2 p-1.5 rounded hover:bg-[#161b22] text-xs text-[#c9d1d9]"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-[#3fb950] flex-shrink-0" />
+                      <span className="truncate flex-1">{user.username}</span>
+                      {user.username === username && (
+                        <span className="text-[10px] text-[#8b949e] px-1 bg-[#21262d] rounded">You</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="p-3 border-t border-[#21262d] text-center">
+                  <button
+                    type="button"
+                    onClick={handleShareRoom}
+                    className="w-full py-1.5 rounded bg-[#21262d] hover:bg-[#30363d] text-xs text-[#c9d1d9] border border-[#30363d] transition"
+                  >
+                    Invite Collaborators
+                  </button>
+                </div>
+              </>
+            )}
+
+            <div className="p-2 border-t border-[#21262d] text-[10px] text-[#8b949e] text-center">
+              Shortcut: <kbd className="px-1 py-0.5 bg-[#161b22] text-[#c9d1d9] rounded border border-[#30363d] font-mono">Ctrl+Enter</kbd>
+            </div>
+          </aside>
+        )}
+
+        {/* 3. Center Code Area & Live Web Preview */}
         <section className="flex-1 flex flex-col min-w-0 bg-[#0d1117]">
-
           {connectionState !== "CONNECTED" && (
             <div className="px-3 py-1.5 bg-[#161b22] border-b border-[#30363d] text-[#d29922] text-xs">
               {connectionTimedOut && "Unable to connect to room. Reconnecting..."}
@@ -1969,29 +3333,187 @@ function App() {
 
           {documentReady && (
             <div className="flex-1 flex flex-col min-h-0">
+              {/* VS Code Editor Tabs Bar */}
+              <div className="editor-tabs-bar">
+                {openTabs.map((fname) => (
+                  <div
+                    key={fname}
+                    onClick={() => setActiveFile(fname)}
+                    className={`editor-tab ${activeFile === fname ? "active" : ""}`}
+                  >
+                    <span>{getFileIcon(fname)}</span>
+                    <span>{fname}</span>
+                    <span
+                      onClick={(e) => handleCloseTab(fname, e)}
+                      className="editor-tab-close"
+                      title="Close Tab"
+                    >
+                      ×
+                    </span>
+                  </div>
+                ))}
+              </div>
 
-              {/* Monaco Editor */}
-              <div className={terminalOpen ? "flex-1 min-h-0" : "flex-1 min-h-0"}>
-                <Editor
-                  height="100%"
-                  language={language}
-                  defaultValue=""
-                  theme="vs-dark"
-                  onMount={handleMount}
-                  options={{
-                    automaticLayout: true,
-                    minimap: {
-                      enabled: false
-                    },
-                    scrollBeyondLastLine: false,
-                    fontSize: 13,
-                    fontFamily: "Consolas, 'Courier New', monospace",
-                    tabSize: 4,
-                    padding: {
-                      top: 8
-                    }
-                  }}
-                />
+              {/* VS Code Breadcrumbs Bar */}
+              {activeFile && (
+                <div className="editor-breadcrumbs">
+                  <span>{room || "workspace"}</span>
+                  <span>›</span>
+                  {activeFile.split("/").map((part, idx, arr) => (
+                    <span key={idx} className="flex items-center gap-1.5">
+                      <span className={idx === arr.length - 1 ? "text-[#f0f6fc] font-medium" : ""}>
+                        {part}
+                      </span>
+                      {idx < arr.length - 1 && <span>›</span>}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Split Editor and Live Web Preview Container */}
+              <div className="preview-split-container">
+                {/* When No Tabs Open */}
+                {(!activeFile || openTabs.length === 0) ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-[#8b949e] bg-[#0d1117] select-none p-6 text-center">
+                    <div className="w-12 h-12 rounded-xl bg-[#161b22] border border-[#30363d] flex items-center justify-center text-[#58a6ff] mb-3">
+                      <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-sm font-semibold text-[#f0f6fc] mb-1">No File Open</h3>
+                    <p className="text-xs text-[#8b949e] max-w-xs mb-4">
+                      Select a file from the explorer on the left or create a new file to start editing.
+                    </p>
+                    <div className="flex items-center gap-2 text-[11px] text-[#8b949e]">
+                      <span className="px-1.5 py-0.5 rounded bg-[#21262d] border border-[#30363d] font-mono">Ctrl+B</span>
+                      <span>Toggle Explorer</span>
+                      <span className="mx-1">•</span>
+                      <span className="px-1.5 py-0.5 rounded bg-[#21262d] border border-[#30363d] font-mono">Ctrl+Shift+F</span>
+                      <span>Search</span>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Monaco Editor */}
+                    <div className={previewOpen ? "w-1/2 min-h-0 flex flex-col" : "flex-1 min-h-0 flex flex-col"}>
+                      <Editor
+                        height="100%"
+                        language={language}
+                        defaultValue=""
+                        theme="vs-dark"
+                        onMount={handleMount}
+                        options={{
+                          automaticLayout: true,
+                          minimap: { enabled: false },
+                          scrollBeyondLastLine: false,
+                          fontSize: 13.5,
+                          fontFamily: "Consolas, 'Menlo', monospace",
+                          tabSize: 4,
+                          padding: { top: 8, bottom: 8 },
+                          renderLineHighlight: "all",
+                          cursorBlinking: "smooth",
+                          smoothScrolling: true,
+                          bracketPairColorization: { enabled: true },
+                          guides: { bracketPairs: true, indentation: true },
+                          renderWhitespace: "selection",
+                          lineNumbersMinChars: 3,
+                          wordWrap: "on"
+                        }}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* Live Web Preview Panel */}
+                {previewOpen && (
+                  <div className="preview-panel">
+                    <div className="preview-header">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-[#f0f6fc]">Live Preview</span>
+                        <div className="preview-address-bar">
+                          <span className="w-2 h-2 rounded-full bg-[#3fb950]" />
+                          <span>http://localhost/syncstream-preview</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <div className="preview-device-group">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewDevice("desktop")}
+                            className={`preview-device-btn ${previewDevice === "desktop" ? "active" : ""}`}
+                            title="Desktop View"
+                          >
+                            Desktop
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewDevice("tablet")}
+                            className={`preview-device-btn ${previewDevice === "tablet" ? "active" : ""}`}
+                            title="Tablet View (768px)"
+                          >
+                            Tablet
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewDevice("mobile")}
+                            className={`preview-device-btn ${previewDevice === "mobile" ? "active" : ""}`}
+                            title="Mobile View (375px)"
+                          >
+                            Mobile
+                          </button>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPreviewKey((k) => k + 1)
+                            updatePreview()
+                          }}
+                          title="Reload Preview"
+                          className="terminal-action-btn"
+                        >
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setPreviewOpen(false)}
+                          title="Close Preview"
+                          className="terminal-action-btn"
+                        >
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="preview-frame-container">
+                      <div
+                        className="preview-frame-wrapper"
+                        style={{
+                          width:
+                            previewDevice === "mobile"
+                              ? "375px"
+                              : previewDevice === "tablet"
+                              ? "768px"
+                              : "100%"
+                        }}
+                      >
+                        <iframe
+                          key={previewKey}
+                          title="SyncStream Live Web Preview"
+                          srcDoc={previewSrcDoc}
+                          sandbox="allow-scripts allow-modals"
+                          className="preview-iframe"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Status Bar */}
@@ -2002,10 +3524,24 @@ function App() {
                       setTerminalOpen(true)
                       setActiveBottomTab("problems")
                     }}
-                    className="flex items-center gap-1.5 cursor-pointer hover:text-[#c9d1d9]"
+                    className="flex items-center gap-2 cursor-pointer hover:text-[#c9d1d9] transition-colors"
                   >
-                    <span className="text-[#f85149]">⊗ {errorsCount}</span>
-                    <span className="text-[#d29922]">⚠ {warningsCount}</span>
+                    <span className="flex items-center gap-1 text-[#f85149]">
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="15" y1="9" x2="9" y2="15" />
+                        <line x1="9" y1="9" x2="15" y2="15" />
+                      </svg>
+                      <span>{errorsCount}</span>
+                    </span>
+                    <span className="flex items-center gap-1 text-[#d29922]">
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                      </svg>
+                      <span>{warningsCount}</span>
+                    </span>
                   </div>
 
                   <span>Ln {cursorPos.lineNumber}, Col {cursorPos.column}</span>
@@ -2014,8 +3550,8 @@ function App() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <span className="capitalize">{language}</span>
-                  <span>SyncStream</span>
+                  <span className="font-mono text-[#58a6ff]">{activeFile}</span>
+                  <span className="capitalize text-[#c9d1d9]">{language}</span>
                 </div>
               </div>
 
@@ -2024,22 +3560,19 @@ function App() {
                 <div
                   className="terminal-panel"
                   style={{
-                    height:
-                      terminalMaximized
-                        ? "80%"
-                        : `${terminalHeight}px`
+                    height: terminalMaximized ? "80%" : `${terminalHeight}px`
                   }}
                 >
                   {!terminalMaximized && (
                     <div
-                      className="terminal-resize-handle"
+                      className={`terminal-resize-handle ${isResizingTerminal ? "resizing" : ""}`}
+                      onMouseDown={handleStartTerminalResize}
                       title="Drag to resize dock"
                     />
                   )}
 
                   {/* Dock Tabs Header */}
                   <div className="dock-header">
-
                     <div className="dock-tabs">
                       <button
                         type="button"
@@ -2056,14 +3589,10 @@ function App() {
                       >
                         <span>Problems</span>
                         {errorsCount > 0 && (
-                          <span className="dock-badge dock-badge-error">
-                            {errorsCount}
-                          </span>
+                          <span className="dock-badge dock-badge-error">{errorsCount}</span>
                         )}
                         {warningsCount > 0 && errorsCount === 0 && (
-                          <span className="dock-badge dock-badge-warning">
-                            {warningsCount}
-                          </span>
+                          <span className="dock-badge dock-badge-warning">{warningsCount}</span>
                         )}
                       </button>
 
@@ -2077,11 +3606,10 @@ function App() {
                     </div>
 
                     <div className="flex items-center gap-1">
-
                       {activeBottomTab === "output" && (
                         <button
                           type="button"
-                          className="text-[11px] px-2 py-0.5 rounded text-[#8b949e] hover:text-[#c9d1d9] bg-[#21262d]"
+                          className="text-[11px] px-2 py-0.5 rounded text-[#8b949e] hover:text-[#c9d1d9] bg-[#21262d] border border-[#30363d] transition-colors"
                           onClick={() => setOutputLogs("")}
                         >
                           Clear
@@ -2094,7 +3622,16 @@ function App() {
                         title={terminalMaximized ? "Restore" : "Maximize"}
                         onClick={() => setTerminalMaximized((c) => !c)}
                       >
-                        {terminalMaximized ? "◱" : "□"}
+                        {terminalMaximized ? (
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                            <polyline points="9 9 9 15 15 15" />
+                          </svg>
+                        ) : (
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                          </svg>
+                        )}
                       </button>
 
                       <button
@@ -2106,9 +3643,10 @@ function App() {
                           setTerminalMaximized(false)
                         }}
                       >
-                        ✕
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
                       </button>
-
                     </div>
                   </div>
 
@@ -2117,10 +3655,7 @@ function App() {
                     ref={terminalContainerRef}
                     className="terminal-container"
                     style={{
-                      display:
-                        activeBottomTab === "terminal"
-                          ? "block"
-                          : "none"
+                      display: activeBottomTab === "terminal" ? "block" : "none"
                     }}
                   />
 
@@ -2138,20 +3673,22 @@ function App() {
                             onClick={() => handleProblemClick(prob)}
                             className="problem-row"
                           >
-                            <span
-                              className={
-                                prob.severity === SEVERITY.ERROR
-                                  ? "text-[#f85149] font-bold"
-                                  : "text-[#d29922] font-bold"
-                              }
-                            >
-                              {prob.severity === SEVERITY.ERROR ? "⊗" : "⚠"}
+                            <span className="flex-shrink-0">
+                              {prob.severity === SEVERITY.ERROR ? (
+                                <svg className="w-3.5 h-3.5 text-[#f85149]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <circle cx="12" cy="12" r="10" />
+                                  <line x1="15" y1="9" x2="9" y2="15" />
+                                  <line x1="9" y1="9" x2="15" y2="15" />
+                                </svg>
+                              ) : (
+                                <svg className="w-3.5 h-3.5 text-[#d29922]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                  <line x1="12" y1="9" x2="12" y2="13" />
+                                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                                </svg>
+                              )}
                             </span>
-
-                            <span className="problem-msg">
-                              {prob.message}
-                            </span>
-
+                            <span className="problem-msg">{prob.message}</span>
                             <span className="text-[11px] text-[#8b949e]">
                               [{prob.startLineNumber}, {prob.startColumn}]
                             </span>
@@ -2167,17 +3704,12 @@ function App() {
                       {outputLogs || "[No execution output. Click 'Run' to execute code.]"}
                     </div>
                   )}
-
                 </div>
               )}
-
             </div>
           )}
-
         </section>
-
       </div>
-
     </main>
   )
 }
