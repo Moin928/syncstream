@@ -4,13 +4,45 @@ import "@xterm/xterm/css/xterm.css"
 import { Editor } from "@monaco-editor/react"
 import { Terminal } from "@xterm/xterm"
 import { MonacoBinding } from "y-monaco"
-import { useRef, useMemo, useState, useEffect } from "react"
+import { useRef, useMemo, useState, useEffect, useCallback } from "react"
 import * as Y from "yjs"
 
 import { SpringWebSocketProvider } from "../yjs/SpringWebSocketProvider"
+import {
+  runDiagnostics,
+  parseCompilerOutput,
+  LANGUAGE_STARTERS,
+  SEVERITY
+} from "../diagnostics"
+
+function getExecutionCommand(language, code) {
+  switch (language) {
+    case "java":
+      return `cat << 'EOF' > Main.java\n${code}\nEOF\njavac Main.java && java Main\n`
+    case "python":
+      return `cat << 'EOF' > main.py\n${code}\nEOF\npython3 main.py || python main.py\n`
+    case "cpp":
+      return `cat << 'EOF' > main.cpp\n${code}\nEOF\ng++ -O2 -std=c++17 main.cpp -o main && ./main\n`
+    case "c":
+      return `cat << 'EOF' > main.c\n${code}\nEOF\ngcc -O2 main.c -o main && ./main\n`
+    case "javascript":
+      return `cat << 'EOF' > index.js\n${code}\nEOF\nnode index.js\n`
+    case "typescript":
+      return `cat << 'EOF' > index.ts\n${code}\nEOF\nnpx -y tsx index.ts || node index.js\n`
+    case "go":
+      return `cat << 'EOF' > main.go\n${code}\nEOF\ngo run main.go\n`
+    case "rust":
+      return `cat << 'EOF' > main.rs\n${code}\nEOF\nrustc main.rs -o main && ./main\n`
+    case "sql":
+      return `cat << 'EOF' > query.sql\n${code}\nEOF\ncat query.sql\n`
+    default:
+      return `cat << 'EOF' > code.txt\n${code}\nEOF\ncat code.txt\n`
+  }
+}
 
 function App() {
   const editorRef = useRef(null)
+  const monacoRef = useRef(null)
   const providerRef = useRef(null)
 
   const terminalRef = useRef(null)
@@ -19,6 +51,7 @@ function App() {
   const terminalResizeObserverRef = useRef(null)
 
   const connectionTimeoutRef = useRef(null)
+  const validationTimerRef = useRef(null)
 
   const remoteCursorsRef = useRef(new Map())
   const remoteCursorWidgetsRef = useRef(new Map())
@@ -55,10 +88,25 @@ function App() {
     useState("javascript")
 
   const [terminalOpen, setTerminalOpen] =
+    useState(true)
+
+  const [activeBottomTab, setActiveBottomTab] =
+    useState("terminal")
+
+  const [diagnostics, setDiagnostics] =
+    useState([])
+
+  const [outputLogs, setOutputLogs] =
+    useState("")
+
+  const [isRunning, setIsRunning] =
     useState(false)
 
+  const [cursorPos, setCursorPos] =
+    useState({ lineNumber: 1, column: 1 })
+
   const [terminalHeight, setTerminalHeight] =
-    useState(260)
+    useState(240)
 
   const [terminalMaximized, setTerminalMaximized] =
     useState(false)
@@ -104,6 +152,57 @@ function App() {
     () => ydoc.getText("monaco"),
     [ydoc]
   )
+
+  const languageRef = useRef(language)
+  const validateCodeRef = useRef(null)
+
+  useEffect(() => {
+    languageRef.current = language
+  }, [language])
+
+  /*
+   * Debounced diagnostics validation.
+   */
+  const validateCode = useCallback(() => {
+    if (!editorRef.current || !monacoRef.current) {
+      return
+    }
+
+    const model = editorRef.current.getModel()
+    if (!model) {
+      return
+    }
+
+    const currentLang = languageRef.current || "javascript"
+    const code = model.getValue()
+    const markers = runDiagnostics(code, currentLang)
+
+    monacoRef.current.editor.setModelMarkers(
+      model,
+      "syncstream-diagnostics",
+      markers
+    )
+
+    setDiagnostics(markers)
+  }, [])
+
+  useEffect(() => {
+    validateCodeRef.current = validateCode
+  }, [validateCode])
+
+  /*
+   * Re-validate and update Monaco language when language changes.
+   */
+  useEffect(() => {
+    languageRef.current = language
+    if (editorRef.current && monacoRef.current) {
+      const model = editorRef.current.getModel()
+      if (model) {
+        monacoRef.current.editor.setModelLanguage(model, language)
+      }
+    }
+    validateCode()
+  }, [language, validateCode])
 
   /*
    * Creates the WebSocket provider when the user joins.
@@ -642,7 +741,7 @@ function App() {
   }, [connectionState])
 
   /*
-   * Xterm terminal.
+   * Xterm terminal initialization.
    */
   useEffect(() => {
     if (
@@ -655,23 +754,22 @@ function App() {
     const terminal =
       new Terminal({
         cursorBlink: true,
-        fontSize: 14,
+        fontSize: 13,
         fontFamily:
           "Consolas, 'Courier New', monospace",
         convertEol: true,
 
         theme: {
-          background: "#0a0a0a",
-          foreground: "#d4d4d4",
-          cursor: "#ffffff",
+          background: "#090d13",
+          foreground: "#c9d1d9",
+          cursor: "#58a6ff",
           cursorAccent:
-            "#0a0a0a",
+            "#090d13",
           selectionBackground:
-            "#264f78"
+            "#1f6feb40"
         },
 
         scrollback: 5000,
-
         allowTransparency: false
       })
 
@@ -717,28 +815,40 @@ function App() {
 
     socket.onmessage =
       (event) => {
+        let text = ""
         if (
           typeof event.data ===
           "string"
         ) {
-          terminal.write(
-            event.data
-          )
-
-          return
-        }
-
-        if (
+          text = event.data
+        } else if (
           event.data instanceof
           ArrayBuffer
         ) {
-          terminal.write(
-            new TextDecoder().decode(
-              new Uint8Array(
-                event.data
-              )
+          text = new TextDecoder().decode(
+            new Uint8Array(
+              event.data
             )
           )
+        }
+
+        terminal.write(text)
+        setOutputLogs((prev) => prev + text)
+
+        if (text.includes("Execution Finished") || text.includes("exited with code") || text.includes("$ ")) {
+          setIsRunning(false)
+        }
+
+        // Check for compiler runtime error markers
+        const runtimeMarkers = parseCompilerOutput(text, language)
+        if (runtimeMarkers.length > 0 && editorRef.current && monacoRef.current) {
+          const model = editorRef.current.getModel()
+          if (model) {
+            const currentMarkers = monacoRef.current.editor.getModelMarkers({ resource: model.uri })
+            const combined = [...currentMarkers, ...runtimeMarkers]
+            monacoRef.current.editor.setModelMarkers(model, "syncstream-diagnostics", combined)
+            setDiagnostics(combined)
+          }
         }
       }
 
@@ -752,12 +862,14 @@ function App() {
         terminal.write(
           "\r\n[Terminal connection error]\r\n"
         )
+        setIsRunning(false)
       }
 
     socket.onclose = () => {
       terminal.write(
         "\r\n[Terminal disconnected]\r\n"
       )
+      setIsRunning(false)
     }
 
     let command = ""
@@ -830,6 +942,7 @@ function App() {
             terminal.write(
               "^C\r\n"
             )
+            setIsRunning(false)
 
             return
           }
@@ -866,8 +979,8 @@ function App() {
           return
         }
 
-        const cellWidth = 8.4
-        const cellHeight = 17
+        const cellWidth = 8.0
+        const cellHeight = 16.5
 
         const cols =
           Math.max(
@@ -938,7 +1051,8 @@ function App() {
   }, [
     terminalOpen,
     room,
-    username
+    username,
+    language
   ])
 
   /*
@@ -947,13 +1061,14 @@ function App() {
   useEffect(() => {
     if (
       terminalOpen &&
+      activeBottomTab === "terminal" &&
       terminalRef.current
     ) {
       requestAnimationFrame(() => {
         terminalRef.current?.focus()
       })
     }
-  }, [terminalOpen])
+  }, [terminalOpen, activeBottomTab])
 
   /*
    * Keep terminal sized correctly.
@@ -978,11 +1093,49 @@ function App() {
     }
   }, [
     terminalHeight,
-    terminalMaximized
+    terminalMaximized,
+    activeBottomTab
   ])
 
   /*
-   * Terminal keyboard shortcuts.
+   * Execute code in runner via clean shell command.
+   */
+  const handleRunCode = useCallback(() => {
+    if (!editorRef.current) {
+      return
+    }
+
+    const code = editorRef.current.getValue()
+
+    if (!terminalOpen) {
+      setTerminalOpen(true)
+    }
+    setActiveBottomTab("terminal")
+    setIsRunning(true)
+
+    const cmd = getExecutionCommand(language, code)
+
+    const sendCmd = () => {
+      if (
+        terminalSocketRef.current &&
+        terminalSocketRef.current.readyState === WebSocket.OPEN
+      ) {
+        terminalSocketRef.current.send(cmd)
+      }
+    }
+
+    if (
+      terminalSocketRef.current &&
+      terminalSocketRef.current.readyState === WebSocket.OPEN
+    ) {
+      sendCmd()
+    } else {
+      setTimeout(sendCmd, 500)
+    }
+  }, [editorRef, terminalOpen, language])
+
+  /*
+   * Keyboard shortcuts: Ctrl+` (toggle terminal) and Ctrl+Enter / F5 (Run).
    */
   useEffect(() => {
     const handleKeyDown =
@@ -996,6 +1149,15 @@ function App() {
           setTerminalOpen(
             (current) => !current
           )
+        } else if (
+          (event.ctrlKey || event.metaKey) &&
+          event.key === "Enter"
+        ) {
+          event.preventDefault()
+          handleRunCode()
+        } else if (event.key === "F5") {
+          event.preventDefault()
+          handleRunCode()
         }
       }
 
@@ -1010,7 +1172,7 @@ function App() {
         handleKeyDown
       )
     }
-  }, [])
+  }, [handleRunCode])
 
   /*
    * Terminal resizing.
@@ -1046,12 +1208,12 @@ function App() {
             const maxHeight =
               Math.floor(
                 window.innerHeight *
-                0.7
+                0.75
               )
 
             const nextHeight =
               Math.max(
-                180,
+                140,
                 Math.min(
                   maxHeight,
                   startHeight +
@@ -1124,9 +1286,9 @@ function App() {
    * Monaco editor setup.
    */
   const handleMount =
-    (editor) => {
-      editorRef.current =
-        editor
+    (editor, monaco) => {
+      editorRef.current = editor
+      monacoRef.current = monaco
 
       new MonacoBinding(
         yText,
@@ -1136,8 +1298,11 @@ function App() {
 
       editor.onDidChangeCursorPosition(
         (event) => {
-          const position =
-            event.position
+          const position = event.position
+          setCursorPos({
+            lineNumber: position.lineNumber,
+            column: position.column
+          })
 
           providerRef.current?.sendCursorPosition(
             position.lineNumber,
@@ -1176,11 +1341,47 @@ function App() {
           )
         }
       )
+
+      editor.onDidChangeModelContent(() => {
+        if (validationTimerRef.current) {
+          clearTimeout(validationTimerRef.current)
+        }
+
+        validationTimerRef.current = setTimeout(() => {
+          validateCodeRef.current?.()
+        }, 200)
+      })
+
+      setTimeout(() => {
+        validateCodeRef.current?.()
+      }, 250)
     }
 
-  /*
-   * Join room.
-   */
+  const handleProblemClick = (problem) => {
+    if (!editorRef.current) {
+      return
+    }
+
+    editorRef.current.revealLineInCenter(problem.startLineNumber)
+    editorRef.current.setPosition({
+      lineNumber: problem.startLineNumber,
+      column: problem.startColumn
+    })
+    editorRef.current.focus()
+  }
+
+  const handleInsertTemplate = () => {
+    const starter = LANGUAGE_STARTERS[language]
+    if (!starter || !editorRef.current) {
+      return
+    }
+
+    ydoc.transact(() => {
+      yText.delete(0, yText.length)
+      yText.insert(0, starter)
+    })
+  }
+
   const handleJoin =
     async (event) => {
       event.preventDefault()
@@ -1292,9 +1493,6 @@ function App() {
       }
     }
 
-  /*
-   * Create room.
-   */
   const handleCreateRoom =
     async (event) => {
       event.preventDefault()
@@ -1385,9 +1583,6 @@ function App() {
       }
     }
 
-  /*
-   * Share room.
-   */
   const handleShareRoom =
     async () => {
       try {
@@ -1414,9 +1609,6 @@ function App() {
       }
     }
 
-  /*
-   * Leave room.
-   */
   const handleLeaveRoom =
     () => {
       setJoined(false)
@@ -1437,63 +1629,13 @@ function App() {
       )
     }
 
-  /*
-   * Connection status display.
-   */
-  const getConnectionStatus =
-    () => {
-      switch (
-        connectionState
-      ) {
-        case "CONNECTED":
-          return {
-            label:
-              "Connected",
-            className:
-              "bg-green-500/15 text-green-400"
-          }
+  const errorsCount = diagnostics.filter(
+    (d) => d.severity === SEVERITY.ERROR
+  ).length
 
-        case "CONNECTING":
-          return {
-            label:
-              connectionTimedOut
-                ? "Connection unavailable"
-                : "Connecting...",
-            className:
-              connectionTimedOut
-                ? "bg-red-500/15 text-red-400"
-                : "bg-yellow-500/15 text-yellow-400"
-          }
-
-        case "RECONNECTING":
-          return {
-            label:
-              connectionTimedOut
-                ? "Connection unavailable"
-                : "Reconnecting...",
-            className:
-              connectionTimedOut
-                ? "bg-red-500/15 text-red-400"
-                : "bg-yellow-500/15 text-yellow-400"
-          }
-
-        case "DISCONNECTED":
-          return {
-            label:
-              "Disconnected",
-            className:
-              "bg-red-500/15 text-red-400"
-          }
-
-        default:
-          return {
-            label:
-              connectionState,
-            className:
-              "bg-gray-800 text-gray-400"
-          }
-      }
-    }
+  const warningsCount = diagnostics.filter(
+    (d) => d.severity === SEVERITY.WARNING
+  ).length
 
   /*
    * Join/create screen.
@@ -1503,39 +1645,41 @@ function App() {
       Boolean(room.trim())
 
     return (
-      <main className="h-screen w-full bg-gray-950 flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-neutral-900 rounded-xl p-6 shadow-xl">
+      <main className="h-screen w-full bg-[#090d13] flex items-center justify-center p-4">
+        <div className="w-full max-w-sm bg-[#161b22] border border-[#30363d] rounded-lg p-6 shadow-xl">
 
-          <h1 className="text-3xl font-bold text-white text-center">
-            SyncStream
-          </h1>
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <svg className="w-6 h-6 text-[#58a6ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+            </svg>
+            <h1 className="text-xl font-bold text-[#f0f6fc]">
+              SyncStream
+            </h1>
+          </div>
 
-          <p className="text-gray-400 text-center mt-2 mb-6">
-            Real-time collaborative code editor
+          <p className="text-[#8b949e] text-center mb-6 text-xs">
+            Collaborative IDE & Code Runner
           </p>
 
           {hasRoomFromUrl ? (
             <form
               onSubmit={handleJoin}
-              className="flex flex-col gap-4"
+              className="flex flex-col gap-3"
             >
-              <div className="p-3 rounded-lg bg-gray-800 text-gray-300">
-                Joining room:{" "}
-                <span className="text-white font-semibold">
-                  {room}
-                </span>
+              <div className="p-2.5 rounded bg-[#0d1117] border border-[#30363d] text-[#8b949e] text-xs">
+                Room: <span className="text-[#58a6ff] font-mono font-medium">{room}</span>
               </div>
 
               <input
                 type="text"
                 name="username"
-                placeholder="Enter your username"
-                className="p-3 rounded-lg bg-gray-800 text-white outline-none"
+                placeholder="Username"
+                className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-xs outline-none border border-[#30363d] focus:border-[#58a6ff]"
                 required
               />
 
               {joinError && (
-                <div className="p-3 rounded-lg bg-red-500/20 border border-red-500/40 text-red-400 text-sm">
+                <div className="p-2 rounded bg-[#f851491a] border border-[#f8514966] text-[#f85149] text-xs">
                   {joinError}
                 </div>
               )}
@@ -1543,10 +1687,10 @@ function App() {
               <button
                 type="submit"
                 disabled={joinLoading}
-                className="p-3 rounded-lg bg-gray-800 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                className="p-2.5 rounded bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-semibold disabled:opacity-50 transition"
               >
                 {joinLoading
-                  ? "Joining Room..."
+                  ? "Joining..."
                   : "Join Room"}
               </button>
             </form>
@@ -1554,18 +1698,18 @@ function App() {
             <>
               <form
                 onSubmit={handleCreateRoom}
-                className="flex flex-col gap-4"
+                className="flex flex-col gap-3"
               >
                 <input
                   type="text"
                   name="username"
-                  placeholder="Enter your username"
-                  className="p-3 rounded-lg bg-gray-800 text-white outline-none"
+                  placeholder="Username"
+                  className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-xs outline-none border border-[#30363d] focus:border-[#58a6ff]"
                   required
                 />
 
                 {createError && (
-                  <div className="p-3 rounded-lg bg-red-500/20 border border-red-500/40 text-red-400 text-sm">
+                  <div className="p-2 rounded bg-[#f851491a] border border-[#f8514966] text-[#f85149] text-xs">
                     {createError}
                   </div>
                 )}
@@ -1573,46 +1717,44 @@ function App() {
                 <button
                   type="submit"
                   disabled={createLoading}
-                  className="p-3 rounded-lg bg-amber-50 text-gray-950 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="p-2.5 rounded bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-semibold disabled:opacity-50 transition"
                 >
                   {createLoading
                     ? "Creating Room..."
-                    : "Create Room"}
+                    : "Create New Room"}
                 </button>
               </form>
 
-              <div className="flex items-center gap-3 my-6">
-                <div className="h-px bg-gray-700 flex-1" />
-
-                <span className="text-gray-500 text-sm">
+              <div className="flex items-center gap-3 my-4">
+                <div className="h-px bg-[#30363d] flex-1" />
+                <span className="text-[#8b949e] text-[10px] uppercase font-semibold">
                   OR
                 </span>
-
-                <div className="h-px bg-gray-700 flex-1" />
+                <div className="h-px bg-[#30363d] flex-1" />
               </div>
 
               <form
                 onSubmit={handleJoin}
-                className="flex flex-col gap-4"
+                className="flex flex-col gap-3"
               >
                 <input
                   type="text"
                   name="room"
-                  placeholder="Enter room ID"
-                  className="p-3 rounded-lg bg-gray-800 text-white outline-none"
+                  placeholder="Room ID"
+                  className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-xs outline-none border border-[#30363d] focus:border-[#58a6ff] font-mono"
                   required
                 />
 
                 <input
                   type="text"
                   name="username"
-                  placeholder="Enter your username"
-                  className="p-3 rounded-lg bg-gray-800 text-white outline-none"
+                  placeholder="Username"
+                  className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-xs outline-none border border-[#30363d] focus:border-[#58a6ff]"
                   required
                 />
 
                 {joinError && (
-                  <div className="p-3 rounded-lg bg-red-500/20 border border-red-500/40 text-red-400 text-sm">
+                  <div className="p-2 rounded bg-[#f851491a] border border-[#f8514966] text-[#f85149] text-xs">
                     {joinError}
                   </div>
                 )}
@@ -1620,10 +1762,10 @@ function App() {
                 <button
                   type="submit"
                   disabled={joinLoading}
-                  className="p-3 rounded-lg bg-gray-800 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="p-2.5 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs font-semibold disabled:opacity-50 border border-[#30363d] transition"
                 >
                   {joinLoading
-                    ? "Joining Room..."
+                    ? "Joining..."
                     : "Join Room"}
                 </button>
               </form>
@@ -1634,76 +1776,131 @@ function App() {
     )
   }
 
-  const connectionStatus =
-    getConnectionStatus()
-
   return (
-    <main className="h-screen w-full bg-gray-950 flex flex-col gap-3 p-4">
+    <main className="h-screen w-full bg-[#0d1117] flex flex-col overflow-hidden">
 
-      <header className="w-full bg-neutral-900 rounded-lg px-4 py-3 flex items-center justify-between">
+      {/* Top Navbar */}
+      <header className="h-11 min-h-[44px] bg-[#161b22] border-b border-[#30363d] px-3 flex items-center justify-between select-none">
 
-        <div className="flex items-center gap-4">
-
-          <div>
-            <h1 className="text-lg font-bold text-white">
+        {/* Left: Brand & Room ID */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-[#58a6ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+            </svg>
+            <span className="text-sm font-semibold text-[#f0f6fc]">
               SyncStream
-            </h1>
-
-            <p className="text-sm text-gray-400">
-              Room: {room}
-            </p>
-          </div>
-
-          <div className="text-sm text-gray-400">
-            User:{" "}
-            <span className="text-white">
-              {username}
             </span>
           </div>
+
+          <div
+            onClick={handleShareRoom}
+            title="Click to copy room link"
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#0d1117] border border-[#30363d] text-[11px] text-[#8b949e] hover:text-[#c9d1d9] hover:border-[#8b949e] cursor-pointer transition"
+          >
+            <span>room:</span>
+            <span className="text-[#58a6ff] font-mono">{room}</span>
+          </div>
+        </div>
+
+        {/* Center: Language & Run Actions */}
+        <div className="flex items-center gap-2">
+
+          <select
+            id="language"
+            value={language}
+            onChange={(event) => {
+              ymetadata.set("language", event.target.value)
+            }}
+            className="bg-[#0d1117] text-[#c9d1d9] text-xs rounded px-2.5 py-1 outline-none border border-[#30363d] hover:border-[#8b949e] focus:border-[#58a6ff] font-sans"
+          >
+            <option value="java">Java 21</option>
+            <option value="python">Python 3</option>
+            <option value="cpp">C++ (GCC)</option>
+            <option value="c">C (GCC)</option>
+            <option value="javascript">JavaScript (Node.js)</option>
+            <option value="typescript">TypeScript</option>
+            <option value="go">Go</option>
+            <option value="rust">Rust</option>
+            <option value="csharp">C#</option>
+            <option value="html">HTML</option>
+            <option value="css">CSS</option>
+            <option value="json">JSON</option>
+            <option value="sql">SQL</option>
+          </select>
+
+          <button
+            type="button"
+            onClick={handleInsertTemplate}
+            title="Insert boilerplate template for selected language"
+            className="px-2 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition"
+          >
+            Template
+          </button>
+
+          <button
+            type="button"
+            onClick={handleRunCode}
+            disabled={isRunning}
+            title="Run Code (Ctrl+Enter / F5)"
+            className="btn-primary-run"
+          >
+            {isRunning ? (
+              <>
+                <svg className="animate-spin w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                </svg>
+                <span>Running...</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+                <span>Run</span>
+              </>
+            )}
+          </button>
 
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* Right: User Presence, Share & Leave */}
+        <div className="flex items-center gap-2">
 
-          <div
-            className={`px-3 py-1 rounded text-sm font-medium ${connectionStatus.className}`}
-          >
-            <span className="mr-2">
-              ●
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#0d1117] border border-[#30363d] text-[11px]">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                connectionState === "CONNECTED"
+                  ? "bg-[#3fb950]"
+                  : "bg-[#d29922]"
+              }`}
+            />
+            <span className="text-[#8b949e]">
+              {username}
             </span>
-
-            {connectionStatus.label}
           </div>
 
           <button
             type="button"
             onClick={handleShareRoom}
-            className="px-3 py-1 rounded bg-gray-800 text-white text-sm hover:bg-gray-700"
+            className="px-2.5 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition"
           >
-            Share Room
+            Share
           </button>
 
           <button
             type="button"
-            onClick={() =>
-              setTerminalOpen(
-                (current) =>
-                  !current
-              )
-            }
-            className="px-3 py-1 rounded bg-gray-800 text-white text-sm hover:bg-gray-700"
+            onClick={() => setTerminalOpen((c) => !c)}
+            className="px-2.5 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition"
           >
-            {terminalOpen
-              ? "Hide Terminal"
-              : "Terminal"}
+            {terminalOpen ? "Hide Console" : "Console"}
           </button>
 
           <button
             type="button"
-            onClick={
-              handleLeaveRoom
-            }
-            className="px-3 py-1 rounded bg-red-500 text-white text-sm hover:bg-red-600"
+            onClick={handleLeaveRoom}
+            className="px-2.5 py-1 rounded hover:bg-[#f8514926] text-[#f85149] text-xs border border-[#f8514940] transition"
           >
             Leave
           </button>
@@ -1712,182 +1909,84 @@ function App() {
       </header>
 
       {shareMessage && (
-        <div className="absolute top-20 right-4 z-20 px-3 py-2 rounded bg-gray-800 text-white text-sm">
-          {shareMessage}
+        <div className="absolute top-14 right-4 z-40 px-3 py-1.5 rounded bg-[#1f6feb] text-white text-xs shadow-lg animate-fade">
+          ✓ {shareMessage}
         </div>
       )}
 
-      <div className="flex flex-1 gap-4 min-h-0">
+      {/* Main Body */}
+      <div className="flex flex-1 min-h-0">
 
-        <aside className="h-full w-1/4 bg-amber-50 rounded-lg overflow-hidden">
+        {/* Left Sidebar: Collaborators */}
+        <aside className="w-48 bg-[#0d1117] border-r border-[#30363d] flex flex-col select-none">
+          <div className="px-3 py-2 border-b border-[#21262d] flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8b949e]">
+              Collaborators ({users.length})
+            </span>
+          </div>
 
-          <h2 className="text-2xl font-bold p-4 border-b border-gray-300">
-            Users
-          </h2>
-
-          <ul className="p-4 overflow-y-auto">
-            {users.map(
-              (user) => (
-                <li
-                  key={
-                    user.clientId
-                  }
-                  className="p-2 bg-gray-800 text-white rounded mb-2 flex items-center gap-2"
-                >
-                  <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
-
-                  <span className="text-white">
-                    {user.username}
+          <div className="p-2 flex-1 overflow-y-auto flex flex-col gap-0.5">
+            {users.map((user) => (
+              <div
+                key={user.clientId}
+                className="sidebar-user-item"
+              >
+                <span className="w-2 h-2 rounded-full bg-[#3fb950] flex-shrink-0" />
+                <span className="truncate flex-1 text-xs">
+                  {user.username}
+                </span>
+                {user.username === username && (
+                  <span className="text-[10px] text-[#8b949e]">
+                    You
                   </span>
+                )}
+              </div>
+            ))}
+          </div>
 
-                  {user.username ===
-                    username && (
-                    <span className="ml-auto text-xs text-gray-400">
-                      You
-                    </span>
-                  )}
-                </li>
-              )
-            )}
-          </ul>
-
+          <div className="p-2 border-t border-[#21262d] text-[10px] text-[#8b949e] text-center">
+            Shortcut: <kbd className="px-1 py-0.5 bg-[#161b22] text-[#c9d1d9] rounded border border-[#30363d] font-mono">Ctrl+Enter</kbd>
+          </div>
         </aside>
 
-        <section className="flex-1 bg-neutral-800 rounded-lg overflow-hidden flex flex-col">
+        {/* Center Code Area */}
+        <section className="flex-1 flex flex-col min-w-0 bg-[#0d1117]">
 
-          {connectionState !==
-            "CONNECTED" && (
-            <div className="px-4 py-2 bg-gray-900 text-gray-400 text-sm">
-
-              {connectionTimedOut &&
-                "Unable to connect to the room. Retrying..."}
-
-              {!connectionTimedOut &&
-                connectionState ===
-                  "CONNECTING" &&
-                "Connecting to the room..."}
-
-              {!connectionTimedOut &&
-                connectionState ===
-                  "RECONNECTING" &&
-                "Connection lost. Reconnecting..."}
-
-              {!connectionTimedOut &&
-                connectionState ===
-                  "DISCONNECTED" &&
-                "Disconnected from the room."}
-
+          {connectionState !== "CONNECTED" && (
+            <div className="px-3 py-1.5 bg-[#161b22] border-b border-[#30363d] text-[#d29922] text-xs">
+              {connectionTimedOut && "Unable to connect to room. Reconnecting..."}
+              {!connectionTimedOut && connectionState === "CONNECTING" && "Connecting..."}
+              {!connectionTimedOut && connectionState === "RECONNECTING" && "Reconnecting..."}
+              {!connectionTimedOut && connectionState === "DISCONNECTED" && "Disconnected."}
             </div>
           )}
 
-          {!documentReady &&
-            connectionState ===
-              "CONNECTED" && (
-            <div className="flex-1 flex items-center justify-center text-gray-400">
-              Syncing document...
+          {!documentReady && connectionState === "CONNECTED" && (
+            <div className="flex-1 flex items-center justify-center text-[#8b949e] text-xs">
+              Syncing shared document...
             </div>
           )}
 
           {documentReady && (
-            <div className="flex-1 min-h-0 flex flex-col">
+            <div className="flex-1 flex flex-col min-h-0">
 
-              <div className="px-3 py-2 bg-neutral-900 border-b border-gray-700 flex items-center justify-between">
-
-                <label
-                  htmlFor="language"
-                  className="text-sm text-gray-400"
-                >
-                  Language
-                </label>
-
-                <select
-                  id="language"
-                  value={language}
-                  onChange={(event) => {
-                    ymetadata.set(
-                      "language",
-                      event.target.value
-                    )
-                  }}
-                  className="bg-gray-800 text-white text-sm rounded px-2 py-1 outline-none"
-                >
-                  <option value="javascript">
-                    JavaScript
-                  </option>
-
-                  <option value="typescript">
-                    TypeScript
-                  </option>
-
-                  <option value="java">
-                    Java
-                  </option>
-
-                  <option value="python">
-                    Python
-                  </option>
-
-                  <option value="cpp">
-                    C++
-                  </option>
-
-                  <option value="csharp">
-                    C#
-                  </option>
-
-                  <option value="go">
-                    Go
-                  </option>
-
-                  <option value="rust">
-                    Rust
-                  </option>
-
-                  <option value="html">
-                    HTML
-                  </option>
-
-                  <option value="css">
-                    CSS
-                  </option>
-
-                  <option value="json">
-                    JSON
-                  </option>
-
-                  <option value="sql">
-                    SQL
-                  </option>
-                </select>
-
-              </div>
-
-              <div
-                className={
-                  terminalOpen
-                    ? "min-h-0 flex-1"
-                    : "flex-1 min-h-0"
-                }
-              >
+              {/* Monaco Editor */}
+              <div className={terminalOpen ? "flex-1 min-h-0" : "flex-1 min-h-0"}>
                 <Editor
                   height="100%"
-                  language={
-                    language
-                  }
+                  language={language}
                   defaultValue=""
                   theme="vs-dark"
-                  onMount={
-                    handleMount
-                  }
+                  onMount={handleMount}
                   options={{
-                    automaticLayout:
-                      true,
+                    automaticLayout: true,
                     minimap: {
-                      enabled: true
+                      enabled: false
                     },
-                    scrollBeyondLastLine:
-                      false,
-                    fontSize: 14,
+                    scrollBeyondLastLine: false,
+                    fontSize: 13,
+                    fontFamily: "Consolas, 'Courier New', monospace",
+                    tabSize: 4,
                     padding: {
                       top: 8
                     }
@@ -1895,79 +1994,180 @@ function App() {
                 />
               </div>
 
+              {/* Status Bar */}
+              <div className="editor-status-bar">
+                <div className="flex items-center gap-3">
+                  <div
+                    onClick={() => {
+                      setTerminalOpen(true)
+                      setActiveBottomTab("problems")
+                    }}
+                    className="flex items-center gap-1.5 cursor-pointer hover:text-[#c9d1d9]"
+                  >
+                    <span className="text-[#f85149]">⊗ {errorsCount}</span>
+                    <span className="text-[#d29922]">⚠ {warningsCount}</span>
+                  </div>
+
+                  <span>Ln {cursorPos.lineNumber}, Col {cursorPos.column}</span>
+                  <span>UTF-8</span>
+                  <span>Spaces: 4</span>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <span className="capitalize">{language}</span>
+                  <span>SyncStream</span>
+                </div>
+              </div>
+
+              {/* Bottom Dock Panel */}
               {terminalOpen && (
                 <div
                   className="terminal-panel"
                   style={{
                     height:
                       terminalMaximized
-                        ? "70%"
+                        ? "80%"
                         : `${terminalHeight}px`
                   }}
                 >
                   {!terminalMaximized && (
                     <div
                       className="terminal-resize-handle"
-                      title="Drag to resize terminal"
+                      title="Drag to resize dock"
                     />
                   )}
 
-                  <div className="terminal-header">
+                  {/* Dock Tabs Header */}
+                  <div className="dock-header">
 
-                    <div className="terminal-title">
-                      <span>
-                        TERMINAL
-                      </span>
-                    </div>
-
-                    <div className="terminal-actions">
-
+                    <div className="dock-tabs">
                       <button
                         type="button"
-                        className="terminal-action"
-                        title={
-                          terminalMaximized
-                            ? "Restore terminal"
-                            : "Maximize terminal"
-                        }
-                        onClick={() =>
-                          setTerminalMaximized(
-                            (current) =>
-                              !current
-                          )
-                        }
+                        onClick={() => setActiveBottomTab("terminal")}
+                        className={`dock-tab ${activeBottomTab === "terminal" ? "active" : ""}`}
                       >
-                        {terminalMaximized
-                          ? "▣"
-                          : "□"}
+                        <span>Terminal</span>
                       </button>
 
                       <button
                         type="button"
-                        className="terminal-action"
-                        title="Close terminal"
-                        onClick={() => {
-                          setTerminalOpen(
-                            false
-                          )
+                        onClick={() => setActiveBottomTab("problems")}
+                        className={`dock-tab ${activeBottomTab === "problems" ? "active" : ""}`}
+                      >
+                        <span>Problems</span>
+                        {errorsCount > 0 && (
+                          <span className="dock-badge dock-badge-error">
+                            {errorsCount}
+                          </span>
+                        )}
+                        {warningsCount > 0 && errorsCount === 0 && (
+                          <span className="dock-badge dock-badge-warning">
+                            {warningsCount}
+                          </span>
+                        )}
+                      </button>
 
-                          setTerminalMaximized(
-                            false
-                          )
+                      <button
+                        type="button"
+                        onClick={() => setActiveBottomTab("output")}
+                        className={`dock-tab ${activeBottomTab === "output" ? "active" : ""}`}
+                      >
+                        <span>Output</span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+
+                      {activeBottomTab === "output" && (
+                        <button
+                          type="button"
+                          className="text-[11px] px-2 py-0.5 rounded text-[#8b949e] hover:text-[#c9d1d9] bg-[#21262d]"
+                          onClick={() => setOutputLogs("")}
+                        >
+                          Clear
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        className="terminal-action-btn"
+                        title={terminalMaximized ? "Restore" : "Maximize"}
+                        onClick={() => setTerminalMaximized((c) => !c)}
+                      >
+                        {terminalMaximized ? "◱" : "□"}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="terminal-action-btn"
+                        title="Close dock"
+                        onClick={() => {
+                          setTerminalOpen(false)
+                          setTerminalMaximized(false)
                         }}
                       >
-                        ×
+                        ✕
                       </button>
 
                     </div>
                   </div>
 
+                  {/* Tab 1: Terminal */}
                   <div
-                    ref={
-                      terminalContainerRef
-                    }
+                    ref={terminalContainerRef}
                     className="terminal-container"
+                    style={{
+                      display:
+                        activeBottomTab === "terminal"
+                          ? "block"
+                          : "none"
+                    }}
                   />
+
+                  {/* Tab 2: Problems */}
+                  {activeBottomTab === "problems" && (
+                    <div className="problems-panel">
+                      {diagnostics.length === 0 ? (
+                        <div className="p-4 text-center text-[#8b949e] text-xs">
+                          No syntax errors detected.
+                        </div>
+                      ) : (
+                        diagnostics.map((prob, idx) => (
+                          <div
+                            key={idx}
+                            onClick={() => handleProblemClick(prob)}
+                            className="problem-row"
+                          >
+                            <span
+                              className={
+                                prob.severity === SEVERITY.ERROR
+                                  ? "text-[#f85149] font-bold"
+                                  : "text-[#d29922] font-bold"
+                              }
+                            >
+                              {prob.severity === SEVERITY.ERROR ? "⊗" : "⚠"}
+                            </span>
+
+                            <span className="problem-msg">
+                              {prob.message}
+                            </span>
+
+                            <span className="text-[11px] text-[#8b949e]">
+                              [{prob.startLineNumber}, {prob.startColumn}]
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tab 3: Output */}
+                  {activeBottomTab === "output" && (
+                    <div className="output-panel">
+                      {outputLogs || "[No execution output. Click 'Run' to execute code.]"}
+                    </div>
+                  )}
+
                 </div>
               )}
 
