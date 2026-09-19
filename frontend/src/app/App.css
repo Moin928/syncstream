@@ -1302,3 +1302,277 @@ select {
     display: none;
   }
 }
+
+/* ==========================================================================
+   Quick Open & Command Palette Modal (Ctrl+P / Ctrl+Shift+P)
+   ========================================================================== */
+.palette-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 60px;
+}
+
+.palette-modal {
+  width: 580px;
+  max-width: 92vw;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-col: column;
+  overflow: hidden;
+  animation: palette-slide-down 0.12s ease-out;
+}
+
+@keyframes palette-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.palette-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #0d1117;
+  border-bottom: 1px solid #21262d;
+}
+
+.palette-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 13px;
+  color: #f0f6fc;
+  font-family: inherit;
+}
+
+.palette-input::placeholder {
+  color: #6e7681;
+}
+
+.palette-list {
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  color: #c9d1d9;
+  cursor: pointer;
+  transition: background 0.08s ease;
+}
+
+.palette-item:hover,
+.palette-item.selected {
+  background: #21262d;
+  color: #ffffff;
+}
+
+.palette-item-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.palette-item-path {
+  font-size: 11px;
+  color: #8b949e;
+  margin-left: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-keybinding {
+  font-family: Consolas, monospace;
+  font-size: 10px;
+  padding: 2px 5px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #8b949e;
+  flex-shrink: 0;
+}
+
+.palette-empty {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+/* ==========================================================================
+   Git Diff Viewer Modal
+   ========================================================================== */
+.diff-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(3px);
+  z-index: 9998;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+
+.diff-modal-content {
+  width: 95vw;
+  height: 90vh;
+  max-width: 1400px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.8);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.diff-modal-header {
+  height: 44px;
+  min-height: 44px;
+  background: #161b22;
+  border-bottom: 1px solid #21262d;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+}
+
+.diff-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f0f6fc;
+}
+
+.diff-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ==========================================================================
+   Follow Mode Pill & Collaborator UI
+   ========================================================================== */
+.follow-active-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #58a6ff;
+  background: rgba(56, 139, 253, 0.15);
+  border: 1px solid rgba(56, 139, 253, 0.35);
+  padding: 1px 6px;
+  border-radius: 10px;
+  animation: pulse-glow 2s infinite ease-in-out;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+
+.collaborator-action-btn.active {
+  background: #1f6feb;
+  color: #ffffff;
+  border-color: #388bfd;
+}
+
+/* ==========================================================================
+   Settings Modal (Appearance, Theme, Font, Minimap)
+   ========================================================================== */
+.settings-modal {
+  width: 520px;
+  max-width: 90vw;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-header {
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: #0d1117;
+  border-bottom: 1px solid #21262d;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f0f6fc;
+}
+
+.settings-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-row-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #c9d1d9;
+}
+
+.settings-row-desc {
+  font-size: 11px;
+  color: #8b949e;
+}
+
+.settings-select {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  border-radius: 5px;
+  padding: 4px 8px;
+  font-size: 12px;
+  outline: none;
+}
+
+.settings-select:focus {
+  border-color: #58a6ff;
+}
