@@ -843,6 +843,66 @@ select {
 }
 
 /* ==========================================================================
+   User Hierarchy & Role Badges (Owner, Admin, Editor, Viewer)
+   ========================================================================== */
+.role-badge {
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: capitalize;
+}
+
+.role-badge-owner {
+  background: rgba(210, 153, 34, 0.2);
+  color: #e3b341;
+  border: 1px solid rgba(210, 153, 34, 0.4);
+}
+
+.role-badge-admin {
+  background: rgba(56, 139, 253, 0.2);
+  color: #58a6ff;
+  border: 1px solid rgba(56, 139, 253, 0.4);
+}
+
+.role-badge-editor {
+  background: rgba(63, 185, 80, 0.15);
+  color: #3fb950;
+  border: 1px solid rgba(63, 185, 80, 0.3);
+}
+
+.role-badge-viewer {
+  background: rgba(139, 148, 158, 0.15);
+  color: #8b949e;
+  border: 1px solid rgba(139, 148, 158, 0.3);
+}
+
+.collaborator-action-btn {
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  background: #21262d;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.collaborator-action-btn:hover {
+  background: #30363d;
+  color: #ffffff;
+}
+
+.collaborator-action-btn.danger:hover {
+  background: rgba(248, 81, 73, 0.2);
+  color: #f85149;
+  border-color: #f8514966;
+}
+
+/* ==========================================================================
    Editor Tabs Bar & Breadcrumbs
    ========================================================================== */
 .editor-tabs-bar {
