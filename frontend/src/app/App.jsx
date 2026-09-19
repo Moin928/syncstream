@@ -1,7 +1,7 @@
 import "./App.css"
 import "@xterm/xterm/css/xterm.css"
 
-import { Editor } from "@monaco-editor/react"
+import { Editor, DiffEditor } from "@monaco-editor/react"
 import { Terminal } from "@xterm/xterm"
 import { MonacoBinding } from "y-monaco"
 import { useRef, useMemo, useState, useEffect, useCallback } from "react"
@@ -431,11 +431,34 @@ function App() {
   // User Hierarchy & Role-Based Access Control
   const [rolesMap, setRolesMap] = useState({})
 
+  // Quick Open & Command Palette
+  const [paletteMode, setPaletteMode] = useState(null) // "quickOpen" | "commandPalette" | null
+  const [paletteQuery, setPaletteQuery] = useState("")
+  const [paletteSelectedIndex, setPaletteSelectedIndex] = useState(0)
+
+  // Git Diff Viewer Modal
+  const [diffModalFile, setDiffModalFile] = useState(null)
+  const [diffInline, setDiffInline] = useState(false)
+
+  // Collaborator Follow Mode
+  const [followingUser, setFollowingUser] = useState(null)
+  const followingUserRef = useRef(null)
+
+  // Editor Appearance & Theme Settings
+  const [editorTheme, setEditorTheme] = useState("vs-dark")
+  const [editorFontSize, setEditorFontSize] = useState(13.5)
+  const [editorMinimap, setEditorMinimap] = useState(false)
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false)
+
   const languageRef = useRef(language)
   const validateCodeRef = useRef(null)
   const isRunningRef = useRef(isRunning)
   const activeFileRef = useRef(activeFile)
   const activeActivityTabRef = useRef(activeActivityTab)
+
+  useEffect(() => {
+    followingUserRef.current = followingUser
+  }, [followingUser])
 
   useEffect(() => {
     languageRef.current = language
@@ -932,6 +955,11 @@ function App() {
         )
         const maxColumn = model.getLineMaxColumn(lineNumber)
         const column = Math.max(1, Math.min(cursor.column, maxColumn))
+
+        // Follow Mode: Auto-scroll viewport to keep followed user in center
+        if (followingUserRef.current && cursor.username === followingUserRef.current) {
+          editor.revealLineInCenter(lineNumber)
+        }
 
         const oldDecoration = remoteCursorsRef.current.get(cursor.clientId)
         const decorations = editor.deltaDecorations(
@@ -1498,8 +1526,197 @@ function App() {
   }, [])
 
   /*
-   * Keyboard shortcuts:
-   * - Ctrl+` (toggle terminal)
+   * Command Palette Available Actions & Shortcuts
+   */
+  const commandsList = useMemo(() => [
+    {
+      id: "run",
+      label: "Run: Run Project",
+      icon: "▶",
+      shortcut: "Ctrl+Enter",
+      action: () => handleRunCode()
+    },
+    {
+      id: "format",
+      label: "Format: Format Document",
+      icon: "📄",
+      shortcut: "Shift+Alt+F",
+      action: () => handleFormatCode()
+    },
+    {
+      id: "quickOpen",
+      label: "File: Quick Open File...",
+      icon: "🔍",
+      shortcut: "Ctrl+P",
+      action: () => {
+        setPaletteMode("quickOpen")
+        setPaletteQuery("")
+        setPaletteSelectedIndex(0)
+      }
+    },
+    {
+      id: "newFile",
+      label: "File: New File",
+      icon: "➕",
+      action: () => {
+        setSidebarOpen(true)
+        setActiveActivityTab("explorer")
+        setIsCreatingNode({ type: "file", parentPath: "" })
+      }
+    },
+    {
+      id: "newFolder",
+      label: "File: New Folder",
+      icon: "📁",
+      action: () => {
+        setSidebarOpen(true)
+        setActiveActivityTab("explorer")
+        setIsCreatingNode({ type: "folder", parentPath: "" })
+      }
+    },
+    {
+      id: "saveZip",
+      label: "Project: Export Project (ZIP)",
+      icon: "📦",
+      action: () => handleExportZip()
+    },
+    {
+      id: "importZip",
+      label: "Project: Import Project (ZIP)",
+      icon: "📥",
+      action: () => importFileInputRef.current?.click()
+    },
+    {
+      id: "toggleWrap",
+      label: `View: Toggle Word Wrap (${wordWrap.toUpperCase()})`,
+      icon: "↩",
+      shortcut: "Alt+Z",
+      action: () => handleToggleWordWrap()
+    },
+    {
+      id: "toggleTerminal",
+      label: "View: Toggle Integrated Terminal",
+      icon: "💻",
+      shortcut: "Ctrl+`",
+      action: () => setTerminalOpen((t) => !t)
+    },
+    {
+      id: "togglePreview",
+      label: "View: Toggle Live Web Preview",
+      icon: "🌐",
+      action: () => setPreviewOpen((p) => !p)
+    },
+    {
+      id: "toggleMinimap",
+      label: `View: Toggle Editor Minimap (${editorMinimap ? "ON" : "OFF"})`,
+      icon: "🗺️",
+      action: () => setEditorMinimap((m) => !m)
+    },
+    {
+      id: "themeDark",
+      label: "Preferences: Color Theme - VS Code Dark",
+      icon: "🎨",
+      action: () => setEditorTheme("vs-dark")
+    },
+    {
+      id: "themeLight",
+      label: "Preferences: Color Theme - VS Code Light",
+      icon: "🎨",
+      action: () => setEditorTheme("light")
+    },
+    {
+      id: "themeHC",
+      label: "Preferences: Color Theme - High Contrast",
+      icon: "🎨",
+      action: () => setEditorTheme("hc-black")
+    },
+    {
+      id: "settings",
+      label: "Preferences: Open Editor Settings",
+      icon: "⚙️",
+      action: () => setSettingsModalOpen(true)
+    },
+    {
+      id: "share",
+      label: "Room: Share Invite Link",
+      icon: "🔗",
+      action: () => handleShareRoom()
+    },
+    {
+      id: "leave",
+      label: "Room: Leave Room",
+      icon: "🚪",
+      action: () => handleLeaveRoom()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [wordWrap, editorMinimap, handleRunCode, handleFormatCode, handleToggleWordWrap])
+
+  const filteredPaletteItems = useMemo(() => {
+    const q = paletteQuery.trim().toLowerCase()
+    if (paletteMode === "quickOpen") {
+      const allFiles = Array.from(yfiles.keys()).filter(
+        (f) => !f.endsWith(".keep") || yfiles.size === 1
+      )
+      if (!q) return allFiles.map((f) => ({ id: f, label: f, type: "file" }))
+      return allFiles
+        .filter((f) => f.toLowerCase().includes(q))
+        .map((f) => ({ id: f, label: f, type: "file" }))
+    }
+
+    if (paletteMode === "commandPalette") {
+      if (!q) return commandsList
+      return commandsList.filter(
+        (c) =>
+          c.label.toLowerCase().includes(q) ||
+          c.id.toLowerCase().includes(q)
+      )
+    }
+
+    return []
+  }, [paletteMode, paletteQuery, yfiles, commandsList])
+
+  const handleExecutePaletteItem = useCallback((item) => {
+    if (!item) return
+    if (paletteMode === "quickOpen") {
+      handleSelectFile(item.id)
+    } else if (paletteMode === "commandPalette" && item.action) {
+      item.action()
+    }
+    setPaletteMode(null)
+    setPaletteQuery("")
+    setPaletteSelectedIndex(0)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paletteMode])
+
+  const handlePaletteKeyDown = useCallback((e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault()
+      setPaletteSelectedIndex((prev) =>
+        prev < filteredPaletteItems.length - 1 ? prev + 1 : 0
+      )
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault()
+      setPaletteSelectedIndex((prev) =>
+        prev > 0 ? prev - 1 : Math.max(0, filteredPaletteItems.length - 1)
+      )
+    } else if (e.key === "Enter") {
+      e.preventDefault()
+      if (filteredPaletteItems[paletteSelectedIndex]) {
+        handleExecutePaletteItem(filteredPaletteItems[paletteSelectedIndex])
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault()
+      setPaletteMode(null)
+      setPaletteQuery("")
+    }
+  }, [filteredPaletteItems, paletteSelectedIndex, handleExecutePaletteItem])
+
+  /*
+   * Global Keyboard shortcuts:
+   * - Ctrl+P (Quick Open)
+   * - Ctrl+Shift+P / F1 (Command Palette)
+   * - Escape (Close Palettes / Modals)
+   * - Ctrl+` (Toggle Terminal)
    * - Ctrl+Enter / F5 (Run)
    * - Shift+Alt+F (Format Document)
    * - Alt+Z (Toggle Word Wrap)
@@ -1508,6 +1725,42 @@ function App() {
    */
   useEffect(() => {
     const handleKeyDown = (event) => {
+      // Escape closes modals
+      if (event.key === "Escape") {
+        if (paletteMode) {
+          setPaletteMode(null)
+          setPaletteQuery("")
+          return
+        }
+        if (diffModalFile) {
+          setDiffModalFile(null)
+          return
+        }
+        if (settingsModalOpen) {
+          setSettingsModalOpen(false)
+          return
+        }
+      }
+
+      // Ctrl+Shift+P or F1: Command Palette
+      if (((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === "P" || event.key === "p")) || event.key === "F1") {
+        event.preventDefault()
+        setPaletteMode("commandPalette")
+        setPaletteQuery("")
+        setPaletteSelectedIndex(0)
+        return
+      }
+
+      // Ctrl+P: Quick Open File
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && (event.key === "P" || event.key === "p")) {
+        event.preventDefault()
+        setPaletteMode("quickOpen")
+        setPaletteQuery("")
+        setPaletteSelectedIndex(0)
+        return
+      }
+
+      // Global Search
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === "F" || event.key === "f")) {
         event.preventDefault()
         setActiveActivityTab("search")
@@ -1539,7 +1792,14 @@ function App() {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [handleRunCode, handleFormatCode, handleToggleWordWrap])
+  }, [
+    paletteMode,
+    diffModalFile,
+    settingsModalOpen,
+    handleRunCode,
+    handleFormatCode,
+    handleToggleWordWrap
+  ])
 
   /*
    * Draggable sidebar & terminal resizers.
@@ -2995,10 +3255,41 @@ function App() {
               </>
             )}
           </button>
+
+          {/* Center: Quick Open File Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setPaletteMode("quickOpen")
+              setPaletteQuery("")
+              setPaletteSelectedIndex(0)
+            }}
+            className="flex items-center gap-2 px-3 py-1 bg-[#0d1117] hover:bg-[#21262d] border border-[#30363d] rounded text-xs text-[#8b949e] hover:text-[#c9d1d9] transition cursor-pointer"
+            title="Quick Open File (Ctrl+P)"
+          >
+            <svg className="w-3.5 h-3.5 text-[#8b949e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <span>Search files...</span>
+            <kbd className="text-[10px] bg-[#161b22] px-1 py-0.2 rounded border border-[#30363d] text-[#8b949e]">Ctrl+P</kbd>
+          </button>
         </div>
 
-        {/* Right: User Presence, Share & Leave */}
+        {/* Right: User Presence, Share, Settings & Leave */}
         <div className="flex items-center gap-2">
+          {/* Follow Mode Status Indicator */}
+          {followingUser && (
+            <div
+              onClick={() => setFollowingUser(null)}
+              className="follow-active-badge cursor-pointer"
+              title="Click to stop following cursor"
+            >
+              <span>Following: {followingUser}</span>
+              <span className="ml-1 text-[9px] hover:text-white">✕</span>
+            </div>
+          )}
+
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#0d1117] border border-[#30363d] text-[11px]">
             <span
               className={`w-2 h-2 rounded-full ${
@@ -3015,6 +3306,19 @@ function App() {
             className="px-2.5 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition"
           >
             Share
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSettingsModalOpen(true)}
+            className="px-2.5 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition flex items-center gap-1.5"
+            title="Editor Settings (Theme, Font Size, Minimap)"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+            </svg>
+            <span>Settings</span>
           </button>
 
           <button
@@ -3641,6 +3945,21 @@ function App() {
                           </div>
 
                           <div className="flex items-center gap-1.5">
+                            {change.status === "M" && (
+                              <button
+                                type="button"
+                                title={`View Diff for ${change.filePath}`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setDiffModalFile(change.filePath)
+                                }}
+                                className="tree-action-btn"
+                              >
+                                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h8M8 12h8m-8 5h8M4 5v14a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H6a2 2 0 00-2 2z" />
+                                </svg>
+                              </button>
+                            )}
                             <button
                               type="button"
                               title={`Discard changes in ${change.filePath}`}
@@ -3796,8 +4115,32 @@ function App() {
 
                         <span className={`role-badge role-badge-${userRole}`}>{userRole}</span>
 
-                        {/* Role Action Controls */}
+                        {/* Role & Follow Action Controls */}
                         <div className="flex items-center gap-1 ml-1">
+                          {!isSelf && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFollowingUser((prev) =>
+                                  prev === user.username ? null : user.username
+                                )
+                              }}
+                              className={`collaborator-action-btn ${
+                                followingUser === user.username ? "active" : ""
+                              }`}
+                              title={
+                                followingUser === user.username
+                                  ? "Stop following"
+                                  : `Follow ${user.username}'s cursor`
+                              }
+                            >
+                              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                              </svg>
+                            </button>
+                          )}
+
                           {canPromote && (
                             <button
                               type="button"
@@ -3946,13 +4289,13 @@ function App() {
                         height="100%"
                         language={language}
                         defaultValue=""
-                        theme="vs-dark"
+                        theme={editorTheme}
                         onMount={handleMount}
                         options={{
                           automaticLayout: true,
-                          minimap: { enabled: false },
+                          minimap: { enabled: editorMinimap },
                           scrollBeyondLastLine: false,
-                          fontSize: 13.5,
+                          fontSize: editorFontSize,
                           fontFamily: "Consolas, 'Menlo', monospace",
                           tabSize: tabSize,
                           padding: { top: 8, bottom: 8 },
@@ -4272,6 +4615,244 @@ function App() {
           )}
         </section>
       </div>
+
+      {/* 4. Quick Open & Command Palette Modal */}
+      {paletteMode && (
+        <div
+          className="palette-overlay"
+          onClick={() => {
+            setPaletteMode(null)
+            setPaletteQuery("")
+          }}
+        >
+          <div className="palette-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="palette-header">
+              <svg className="w-4 h-4 text-[#8b949e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                {paletteMode === "quickOpen" ? (
+                  <>
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </>
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                )}
+              </svg>
+              <input
+                type="text"
+                autoFocus
+                placeholder={
+                  paletteMode === "quickOpen"
+                    ? "Search files by name..."
+                    : "Type a command or action..."
+                }
+                value={paletteQuery}
+                onChange={(e) => {
+                  setPaletteQuery(e.target.value)
+                  setPaletteSelectedIndex(0)
+                }}
+                onKeyDown={handlePaletteKeyDown}
+                className="palette-input"
+              />
+              <span className="text-[10px] text-[#8b949e] px-1.5 py-0.5 rounded bg-[#21262d] border border-[#30363d]">
+                Esc to close
+              </span>
+            </div>
+
+            <div className="palette-list">
+              {filteredPaletteItems.length === 0 ? (
+                <div className="palette-empty">No matching items found.</div>
+              ) : (
+                filteredPaletteItems.map((item, idx) => (
+                  <div
+                    key={item.id}
+                    onClick={() => handleExecutePaletteItem(item)}
+                    className={`palette-item ${idx === paletteSelectedIndex ? "selected" : ""}`}
+                  >
+                    <div className="palette-item-left">
+                      {paletteMode === "quickOpen" ? (
+                        <>
+                          <span className="text-xs">{getFileIcon(item.id)}</span>
+                          <span className="truncate">{item.id}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>{item.icon || "•"}</span>
+                          <span className="truncate">{item.label}</span>
+                        </>
+                      )}
+                    </div>
+                    {item.shortcut && (
+                      <span className="palette-keybinding">{item.shortcut}</span>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Git Diff Viewer Modal */}
+      {diffModalFile && (
+        <div className="diff-modal-overlay" onClick={() => setDiffModalFile(null)}>
+          <div className="diff-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="diff-modal-header">
+              <div className="diff-modal-title">
+                <span>{getFileIcon(diffModalFile)}</span>
+                <span>{diffModalFile} (Working Tree ⟷ Baseline)</span>
+              </div>
+              <div className="diff-modal-actions">
+                <button
+                  type="button"
+                  onClick={() => setDiffInline((d) => !d)}
+                  className="px-2.5 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition"
+                >
+                  {diffInline ? "Side-by-Side View" : "Inline View"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleDiscardChange(diffModalFile, "M")
+                    setDiffModalFile(null)
+                  }}
+                  className="px-2.5 py-1 rounded bg-[#f8514926] hover:bg-[#f8514940] text-[#f85149] text-xs border border-[#f8514940] transition"
+                >
+                  Discard Changes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDiffModalFile(null)}
+                  className="terminal-action-btn"
+                  title="Close Diff (Esc)"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 bg-[#0d1117]">
+              <DiffEditor
+                height="100%"
+                language={getLanguageFromFileName(diffModalFile)}
+                original={baselineFiles[diffModalFile] || ""}
+                modified={ydoc.getText("file:" + diffModalFile).toString()}
+                theme={editorTheme}
+                options={{
+                  readOnly: true,
+                  renderSideBySide: !diffInline,
+                  automaticLayout: true,
+                  fontSize: editorFontSize,
+                  minimap: { enabled: editorMinimap },
+                  scrollBeyondLastLine: false,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. Editor Settings & Appearance Modal */}
+      {settingsModalOpen && (
+        <div className="diff-modal-overlay" onClick={() => setSettingsModalOpen(false)}>
+          <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="settings-header">
+              <div className="flex items-center gap-2">
+                <span>⚙️</span>
+                <span>Editor & Workspace Settings</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSettingsModalOpen(false)}
+                className="terminal-action-btn"
+                title="Close Settings (Esc)"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="settings-body">
+              <div className="settings-row">
+                <div>
+                  <div className="settings-row-label">Color Theme</div>
+                  <div className="settings-row-desc">Select the active Monaco editor color theme</div>
+                </div>
+                <select
+                  value={editorTheme}
+                  onChange={(e) => setEditorTheme(e.target.value)}
+                  className="settings-select"
+                >
+                  <option value="vs-dark">VS Code Dark</option>
+                  <option value="light">VS Code Light</option>
+                  <option value="hc-black">High Contrast (Black)</option>
+                </select>
+              </div>
+
+              <div className="settings-row">
+                <div>
+                  <div className="settings-row-label">Font Size</div>
+                  <div className="settings-row-desc">Editor font size (pixels)</div>
+                </div>
+                <select
+                  value={editorFontSize}
+                  onChange={(e) => setEditorFontSize(Number(e.target.value))}
+                  className="settings-select"
+                >
+                  <option value={12}>12 px</option>
+                  <option value={13.5}>13.5 px (Default)</option>
+                  <option value={15}>15 px</option>
+                  <option value={16}>16 px</option>
+                  <option value={18}>18 px</option>
+                </select>
+              </div>
+
+              <div className="settings-row">
+                <div>
+                  <div className="settings-row-label">Editor Minimap</div>
+                  <div className="settings-row-desc">Show miniature code overview scrollbar</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditorMinimap((m) => !m)}
+                  className={`px-3 py-1 rounded text-xs border transition ${
+                    editorMinimap ? "bg-[#1f6feb] text-white border-[#388bfd]" : "bg-[#21262d] text-[#8b949e] border-[#30363d]"
+                  }`}
+                >
+                  {editorMinimap ? "Enabled" : "Disabled"}
+                </button>
+              </div>
+
+              <div className="settings-row">
+                <div>
+                  <div className="settings-row-label">Tab Indentation</div>
+                  <div className="settings-row-desc">Number of spaces per indentation level</div>
+                </div>
+                <select
+                  value={tabSize}
+                  onChange={(e) => setTabSize(Number(e.target.value))}
+                  className="settings-select"
+                >
+                  <option value={2}>2 Spaces</option>
+                  <option value={4}>4 Spaces (Default)</option>
+                </select>
+              </div>
+
+              <div className="settings-row">
+                <div>
+                  <div className="settings-row-label">Word Wrap</div>
+                  <div className="settings-row-desc">Wrap lines that exceed viewport width</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleToggleWordWrap}
+                  className={`px-3 py-1 rounded text-xs border transition ${
+                    wordWrap === "on" ? "bg-[#1f6feb] text-white border-[#388bfd]" : "bg-[#21262d] text-[#8b949e] border-[#30363d]"
+                  }`}
+                >
+                  {wordWrap.toUpperCase()}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
