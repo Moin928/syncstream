@@ -494,12 +494,15 @@ function App() {
    */
   useEffect(() => {
     if (documentReady && !baselineInitialized && yfiles.size > 0) {
-      const snap = {}
-      for (const fname of yfiles.keys()) {
-        snap[fname] = ydoc.getText("file:" + fname).toString()
-      }
-      setBaselineFiles(snap)
-      setBaselineInitialized(true)
+      const timer = setTimeout(() => {
+        const snap = {}
+        for (const fname of yfiles.keys()) {
+          snap[fname] = ydoc.getText("file:" + fname).toString()
+        }
+        setBaselineFiles(snap)
+        setBaselineInitialized(true)
+      }, 300)
+      return () => clearTimeout(timer)
     }
   }, [documentReady, baselineInitialized, yfiles, ydoc])
 
@@ -507,6 +510,7 @@ function App() {
    * Compute dynamic workspace Git changes.
    */
   const gitChanges = useMemo(() => {
+    if (!baselineInitialized) return []
     const changes = []
     const currentKeys = Array.from(yfiles.keys()).filter(
       (f) => !f.endsWith(".keep") || yfiles.size === 1
@@ -528,7 +532,7 @@ function App() {
     }
 
     return changes
-  }, [yfiles, baselineFiles, ydoc])
+  }, [baselineInitialized, yfiles, baselineFiles, ydoc])
 
   const gitStatusMap = useMemo(() => {
     const map = {}
@@ -785,21 +789,19 @@ function App() {
       const defaultName = getFileNameForLanguage(language)
       const starter = LANGUAGE_STARTERS[language] || ""
       ydoc.transact(() => {
-        yfiles.set(defaultName, { name: defaultName, language })
+        if (!yfiles.has(defaultName)) {
+          yfiles.set(defaultName, { name: defaultName, language })
+        }
         const fileText = ydoc.getText("file:" + defaultName)
-        if (fileText.length === 0) {
-          if (yText.length > 0) {
-            fileText.insert(0, yText.toString())
-          } else if (starter) {
-            fileText.insert(0, starter)
-          }
+        if (fileText.length === 0 && starter) {
+          fileText.insert(0, starter)
         }
       })
       setActiveFile(defaultName)
       setOpenTabs([defaultName])
       setFileList([defaultName])
     }
-  }, [documentReady, yfiles, language, ydoc, yText])
+  }, [documentReady, yfiles, language, ydoc])
 
   /*
    * Creates the WebSocket provider when the user joins.
@@ -3681,10 +3683,6 @@ function App() {
                 </div>
               </>
             )}
-
-            <div className="p-2 border-t border-[#21262d] text-[10px] text-[#8b949e] text-center">
-              Shortcut: <kbd className="px-1 py-0.5 bg-[#161b22] text-[#c9d1d9] rounded border border-[#30363d] font-mono">Ctrl+Enter</kbd>
-            </div>
           </aside>
         )}
 
