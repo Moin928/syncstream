@@ -416,13 +416,19 @@ function App() {
   const yfiles = useMemo(() => ydoc.getMap("files"), [ydoc])
   const ychat = useMemo(() => ydoc.getArray("chat"), [ydoc])
   const ycommits = useMemo(() => ydoc.getArray("commits"), [ydoc])
+  const yroles = useMemo(() => ydoc.getMap("roles"), [ydoc])
+  const ykicked = useMemo(() => ydoc.getMap("kicked"), [ydoc])
   const yText = useMemo(() => ydoc.getText("monaco"), [ydoc])
 
-  // Source Control / Git State
+  // Source Control / Git State & Content Revision
   const [commitsList, setCommitsList] = useState([])
   const [gitCommitMessage, setGitCommitMessage] = useState("")
   const [baselineFiles, setBaselineFiles] = useState({})
   const [baselineInitialized, setBaselineInitialized] = useState(false)
+  const [contentRevision, setContentRevision] = useState(0)
+
+  // User Hierarchy & Role-Based Access Control
+  const [rolesMap, setRolesMap] = useState({})
 
   const languageRef = useRef(language)
   const validateCodeRef = useRef(null)
@@ -490,6 +496,62 @@ function App() {
   }, [ycommits])
 
   /*
+   * Synchronize collaborative User Roles.
+   */
+  useEffect(() => {
+    const handleRolesChange = () => {
+      const currentRoles = {}
+      for (const [u, r] of yroles.entries()) {
+        currentRoles[u] = r
+      }
+      setRolesMap(currentRoles)
+    }
+
+    yroles.observe(handleRolesChange)
+    handleRolesChange()
+    return () => yroles.unobserve(handleRolesChange)
+  }, [yroles])
+
+  /*
+   * Assign initial Owner / Editor role upon document sync.
+   */
+  useEffect(() => {
+    if (documentReady && username) {
+      if (yroles.size === 0) {
+        yroles.set(username, "owner")
+      } else if (!yroles.has(username)) {
+        yroles.set(username, "editor")
+      }
+    }
+  }, [documentReady, username, yroles])
+
+  /*
+   * Reactively bump content revision on Yjs updates.
+   */
+  useEffect(() => {
+    const handleDocUpdate = () => {
+      setContentRevision((r) => r + 1)
+    }
+    ydoc.on("update", handleDocUpdate)
+    return () => ydoc.off("update", handleDocUpdate)
+  }, [ydoc])
+
+  /*
+   * Detect if the current user has been kicked from the room.
+   */
+  useEffect(() => {
+    const handleKickCheck = () => {
+      if (ykicked.get(username) === true) {
+        handleLeaveRoom()
+      }
+    }
+    ykicked.observe(handleKickCheck)
+    handleKickCheck()
+    return () => ykicked.unobserve(handleKickCheck)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ykicked, username])
+
+  /*
    * Initialize baseline snapshot for Git change tracking.
    */
   useEffect(() => {
@@ -507,7 +569,7 @@ function App() {
   }, [documentReady, baselineInitialized, yfiles, ydoc])
 
   /*
-   * Compute dynamic workspace Git changes.
+   * Compute dynamic workspace Git changes (reacts live to contentRevision).
    */
   const gitChanges = useMemo(() => {
     if (!baselineInitialized) return []
@@ -532,7 +594,7 @@ function App() {
     }
 
     return changes
-  }, [baselineInitialized, yfiles, baselineFiles, ydoc])
+  }, [baselineInitialized, yfiles, baselineFiles, ydoc, contentRevision])
 
   const gitStatusMap = useMemo(() => {
     const map = {}
@@ -541,6 +603,40 @@ function App() {
     })
     return map
   }, [gitChanges])
+
+  const myRole = rolesMap[username] || "editor"
+  const isViewer = myRole === "viewer"
+  const isOwner = myRole === "owner"
+  const isAdmin = myRole === "admin"
+
+  const handlePromoteUser = (targetUsername) => {
+    const targetRole = rolesMap[targetUsername] || "editor"
+    if (isOwner) {
+      if (targetRole === "viewer") yroles.set(targetUsername, "editor")
+      else if (targetRole === "editor") yroles.set(targetUsername, "admin")
+    } else if (isAdmin && targetRole === "viewer") {
+      yroles.set(targetUsername, "editor")
+    }
+  }
+
+  const handleDemoteUser = (targetUsername) => {
+    const targetRole = rolesMap[targetUsername] || "editor"
+    if (isOwner) {
+      if (targetRole === "admin") yroles.set(targetUsername, "editor")
+      else if (targetRole === "editor") yroles.set(targetUsername, "viewer")
+    } else if (isAdmin && targetRole === "editor") {
+      yroles.set(targetUsername, "viewer")
+    }
+  }
+
+  const handleKickUser = (targetUsername) => {
+    const targetRole = rolesMap[targetUsername] || "editor"
+    if (isOwner && targetRole !== "owner") {
+      ykicked.set(targetUsername, true)
+    } else if (isAdmin && (targetRole === "editor" || targetRole === "viewer")) {
+      ykicked.set(targetUsername, true)
+    }
+  }
 
   const handleCommit = (e) => {
     e?.preventDefault()
@@ -1579,6 +1675,7 @@ function App() {
     })
 
     editor.onDidChangeModelContent(() => {
+      setContentRevision((r) => r + 1)
       if (validationTimerRef.current) {
         clearTimeout(validationTimerRef.current)
       }
@@ -2463,7 +2560,7 @@ function App() {
               )}
             </div>
 
-            {!isRenaming && (
+            {!isRenaming && !isViewer && (
               <div className="tree-node-actions">
                 <button
                   type="button"
@@ -2603,7 +2700,7 @@ function App() {
           )}
         </div>
 
-        {!isRenaming && (
+        {!isRenaming && !isViewer && (
           <div className="tree-node-actions">
             <button
               type="button"
@@ -2831,8 +2928,9 @@ function App() {
           <button
             type="button"
             onClick={handleInsertTemplate}
-            title="Insert boilerplate template for active file"
-            className="px-2 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition"
+            disabled={isViewer}
+            title={isViewer ? "Viewers cannot edit" : "Insert boilerplate template for active file"}
+            className="px-2 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Template
           </button>
@@ -2840,7 +2938,8 @@ function App() {
           <button
             type="button"
             onClick={handleFormatCode}
-            title="Format Document (Shift+Alt+F)"
+            disabled={isViewer}
+            title={isViewer ? "Viewers cannot edit" : "Format Document (Shift+Alt+F)"}
             className="px-2.5 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition flex items-center gap-1.5"
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2871,9 +2970,9 @@ function App() {
           <button
             type="button"
             onClick={handleRunCode}
-            disabled={isRunning}
-            title="Run Project (Ctrl+Enter / F5)"
-            className="btn-primary-run"
+            disabled={isRunning || isViewer}
+            title={isViewer ? "Viewers cannot run code" : "Run Project (Ctrl+Enter / F5)"}
+            className="btn-primary-run disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isRunning ? (
               <>
@@ -2903,6 +3002,7 @@ function App() {
               }`}
             />
             <span className="text-[#8b949e]">{username}</span>
+            <span className={`role-badge role-badge-${myRole}`}>{myRole}</span>
           </div>
 
           <button
@@ -3083,36 +3183,40 @@ function App() {
                 <div className="sidebar-title-header">
                   <span>Explorer</span>
                   <div className="sidebar-action-icons">
-                    <button
-                      type="button"
-                      title="New File"
-                      onClick={() => setIsCreatingNode({ type: "file", parentPath: "" })}
-                      className="sidebar-icon-btn"
-                    >
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                    </button>
-                    <button
-                      type="button"
-                      title="New Folder"
-                      onClick={() => setIsCreatingNode({ type: "folder", parentPath: "" })}
-                      className="sidebar-icon-btn"
-                    >
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-                      </svg>
-                    </button>
-                    <button
-                      type="button"
-                      title="Import Project (ZIP)"
-                      onClick={() => importFileInputRef.current?.click()}
-                      className="sidebar-icon-btn"
-                    >
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                      </svg>
-                    </button>
+                    {!isViewer && (
+                      <>
+                        <button
+                          type="button"
+                          title="New File"
+                          onClick={() => setIsCreatingNode({ type: "file", parentPath: "" })}
+                          className="sidebar-icon-btn"
+                        >
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          title="New Folder"
+                          onClick={() => setIsCreatingNode({ type: "folder", parentPath: "" })}
+                          className="sidebar-icon-btn"
+                        >
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          title="Import Project (ZIP)"
+                          onClick={() => importFileInputRef.current?.click()}
+                          className="sidebar-icon-btn"
+                        >
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                          </svg>
+                        </button>
+                      </>
+                    )}
                     <button
                       type="button"
                       title="Export Project (ZIP)"
@@ -3657,19 +3761,85 @@ function App() {
                   <span className="text-[10px] text-[#8b949e]">({users.length})</span>
                 </div>
 
-                <div className="p-2 flex-1 overflow-y-auto flex flex-col gap-1">
-                  {users.map((user) => (
-                    <div
-                      key={user.clientId}
-                      className="flex items-center gap-2 p-1.5 rounded hover:bg-[#161b22] text-xs text-[#c9d1d9]"
-                    >
-                      <span className="w-2 h-2 rounded-full bg-[#3fb950] flex-shrink-0" />
-                      <span className="truncate flex-1">{user.username}</span>
-                      {user.username === username && (
-                        <span className="text-[10px] text-[#8b949e] px-1 bg-[#21262d] rounded">You</span>
-                      )}
-                    </div>
-                  ))}
+                <div className="p-2 flex-1 overflow-y-auto flex flex-col gap-1.5">
+                  {users.map((user) => {
+                    const userRole = rolesMap[user.username] || "editor"
+                    const isSelf = user.username === username
+                    const canPromote =
+                      !isSelf &&
+                      ((isOwner && (userRole === "viewer" || userRole === "editor")) ||
+                        (isAdmin && userRole === "viewer"))
+                    const canDemote =
+                      !isSelf &&
+                      ((isOwner && (userRole === "admin" || userRole === "editor")) ||
+                        (isAdmin && userRole === "editor"))
+                    const canKick =
+                      !isSelf &&
+                      ((isOwner && userRole !== "owner") ||
+                        (isAdmin && (userRole === "editor" || userRole === "viewer")))
+
+                    return (
+                      <div
+                        key={user.clientId}
+                        className="flex items-center gap-1.5 p-2 rounded bg-[#161b22]/50 hover:bg-[#161b22] border border-[#21262d] text-xs text-[#c9d1d9]"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-[#3fb950] flex-shrink-0" />
+                        <span className="truncate flex-1 font-medium">{user.username}</span>
+
+                        {isSelf && (
+                          <span className="text-[10px] text-[#8b949e] px-1 bg-[#21262d] rounded">You</span>
+                        )}
+
+                        <span className={`role-badge role-badge-${userRole}`}>{userRole}</span>
+
+                        {/* Role Action Controls */}
+                        <div className="flex items-center gap-1 ml-1">
+                          {canPromote && (
+                            <button
+                              type="button"
+                              onClick={() => handlePromoteUser(user.username)}
+                              className="collaborator-action-btn"
+                              title={
+                                userRole === "viewer" ? "Promote to Editor" : "Promote to Admin"
+                              }
+                            >
+                              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                              </svg>
+                            </button>
+                          )}
+
+                          {canDemote && (
+                            <button
+                              type="button"
+                              onClick={() => handleDemoteUser(user.username)}
+                              className="collaborator-action-btn"
+                              title={
+                                userRole === "admin" ? "Demote to Editor" : "Demote to Viewer"
+                              }
+                            >
+                              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                              </svg>
+                            </button>
+                          )}
+
+                          {canKick && (
+                            <button
+                              type="button"
+                              onClick={() => handleKickUser(user.username)}
+                              className="collaborator-action-btn danger"
+                              title="Kick user from room"
+                            >
+                              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
 
                 <div className="p-3 border-t border-[#21262d] text-center">
@@ -3789,7 +3959,8 @@ function App() {
                           guides: { bracketPairs: true, indentation: true },
                           renderWhitespace: "selection",
                           lineNumbersMinChars: 3,
-                          wordWrap: wordWrap
+                          wordWrap: wordWrap,
+                          readOnly: isViewer
                         }}
                       />
                     </div>
