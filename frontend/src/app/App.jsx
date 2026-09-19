@@ -15,6 +15,7 @@ import {
   LANGUAGE_STARTERS,
   SEVERITY
 } from "../diagnostics"
+import { formatDocument } from "../formatting"
 
 function getLanguageFromFileName(filename) {
   if (!filename) return "javascript"
@@ -353,6 +354,8 @@ function App() {
   const [cursorPos, setCursorPos] = useState({ lineNumber: 1, column: 1 })
   const [terminalHeight, setTerminalHeight] = useState(240)
   const [terminalMaximized, setTerminalMaximized] = useState(false)
+  const [tabSize, setTabSize] = useState(4)
+  const [wordWrap, setWordWrap] = useState("on")
 
   // VS Code Layout State
   const [activeActivityTab, setActiveActivityTab] = useState("explorer")
@@ -412,7 +415,14 @@ function App() {
   const ymetadata = useMemo(() => ydoc.getMap("metadata"), [ydoc])
   const yfiles = useMemo(() => ydoc.getMap("files"), [ydoc])
   const ychat = useMemo(() => ydoc.getArray("chat"), [ydoc])
+  const ycommits = useMemo(() => ydoc.getArray("commits"), [ydoc])
   const yText = useMemo(() => ydoc.getText("monaco"), [ydoc])
+
+  // Source Control / Git State
+  const [commitsList, setCommitsList] = useState([])
+  const [gitCommitMessage, setGitCommitMessage] = useState("")
+  const [baselineFiles, setBaselineFiles] = useState({})
+  const [baselineInitialized, setBaselineInitialized] = useState(false)
 
   const languageRef = useRef(language)
   const validateCodeRef = useRef(null)
@@ -464,6 +474,119 @@ function App() {
       ychat.unobserve(handleChatChange)
     }
   }, [ychat])
+
+  /*
+   * Synchronize collaborative Git commit history.
+   */
+  useEffect(() => {
+    const handleCommitsChange = () => {
+      setCommitsList(ycommits.toArray())
+    }
+    ycommits.observe(handleCommitsChange)
+    handleCommitsChange()
+    return () => {
+      ycommits.unobserve(handleCommitsChange)
+    }
+  }, [ycommits])
+
+  /*
+   * Initialize baseline snapshot for Git change tracking.
+   */
+  useEffect(() => {
+    if (documentReady && !baselineInitialized && yfiles.size > 0) {
+      const snap = {}
+      for (const fname of yfiles.keys()) {
+        snap[fname] = ydoc.getText("file:" + fname).toString()
+      }
+      setBaselineFiles(snap)
+      setBaselineInitialized(true)
+    }
+  }, [documentReady, baselineInitialized, yfiles, ydoc])
+
+  /*
+   * Compute dynamic workspace Git changes.
+   */
+  const gitChanges = useMemo(() => {
+    const changes = []
+    const currentKeys = Array.from(yfiles.keys()).filter(
+      (f) => !f.endsWith(".keep") || yfiles.size === 1
+    )
+
+    for (const fname of currentKeys) {
+      const currentContent = ydoc.getText("file:" + fname).toString()
+      if (baselineFiles[fname] === undefined) {
+        changes.push({ filePath: fname, status: "U" })
+      } else if (baselineFiles[fname] !== currentContent) {
+        changes.push({ filePath: fname, status: "M" })
+      }
+    }
+
+    for (const fname of Object.keys(baselineFiles)) {
+      if (!yfiles.has(fname) && !fname.endsWith(".keep")) {
+        changes.push({ filePath: fname, status: "D" })
+      }
+    }
+
+    return changes
+  }, [yfiles, baselineFiles, ydoc])
+
+  const gitStatusMap = useMemo(() => {
+    const map = {}
+    gitChanges.forEach((c) => {
+      map[c.filePath] = c.status
+    })
+    return map
+  }, [gitChanges])
+
+  const handleCommit = (e) => {
+    e?.preventDefault()
+    const msg = gitCommitMessage.trim() || "Update workspace"
+    if (gitChanges.length === 0) return
+
+    const newCommit = {
+      id: crypto.randomUUID().slice(0, 7),
+      message: msg,
+      author: username || "Anonymous",
+      timestamp: Date.now(),
+      filesCount: gitChanges.length
+    }
+
+    ycommits.push([newCommit])
+
+    const nextBaseline = {}
+    for (const fname of yfiles.keys()) {
+      nextBaseline[fname] = ydoc.getText("file:" + fname).toString()
+    }
+    setBaselineFiles(nextBaseline)
+    setGitCommitMessage("")
+  }
+
+  const handleDiscardChange = (filePath, status, e) => {
+    e?.stopPropagation()
+    if (status === "U") {
+      handleDeleteFile(filePath)
+    } else if (status === "M") {
+      const original = baselineFiles[filePath]
+      if (original !== undefined) {
+        const ytext = ydoc.getText("file:" + filePath)
+        ydoc.transact(() => {
+          ytext.delete(0, ytext.length)
+          ytext.insert(0, original)
+        })
+      }
+    } else if (status === "D") {
+      const original = baselineFiles[filePath]
+      if (original !== undefined) {
+        const fileLang = getLanguageFromFileName(filePath)
+        ydoc.transact(() => {
+          yfiles.set(filePath, { name: filePath, language: fileLang })
+          const ytext = ydoc.getText("file:" + filePath)
+          ytext.delete(0, ytext.length)
+          ytext.insert(0, original)
+        })
+      }
+    }
+  }
 
   const handleSendChat = (e) => {
     e?.preventDefault()
@@ -1251,7 +1374,38 @@ function App() {
   }, [editorRef, terminalOpen, activeFile, yfiles, ydoc])
 
   /*
-   * Keyboard shortcuts: Ctrl+` (toggle terminal) and Ctrl+Enter / F5 (Run).
+   * Format document with multi-language formatter.
+   */
+  const handleFormatCode = useCallback(() => {
+    if (!editorRef.current || !activeFile) return
+    const model = editorRef.current.getModel()
+    if (!model) return
+
+    const currentCode = model.getValue()
+    const currentLang = getLanguageFromFileName(activeFile)
+    const formatted = formatDocument(currentCode, currentLang, { tabSize })
+
+    if (formatted && formatted !== currentCode) {
+      const activeYText = ydoc.getText("file:" + activeFile)
+      ydoc.transact(() => {
+        activeYText.delete(0, activeYText.length)
+        activeYText.insert(0, formatted)
+      })
+    }
+  }, [activeFile, tabSize, ydoc])
+
+  const handleToggleWordWrap = useCallback(() => {
+    setWordWrap((prev) => (prev === "on" ? "off" : "on"))
+  }, [])
+
+  /*
+   * Keyboard shortcuts:
+   * - Ctrl+` (toggle terminal)
+   * - Ctrl+Enter / F5 (Run)
+   * - Shift+Alt+F (Format Document)
+   * - Alt+Z (Toggle Word Wrap)
+   * - Ctrl+B (Toggle Sidebar)
+   * - Ctrl+Shift+F (Global Search)
    */
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -1263,6 +1417,12 @@ function App() {
           searchInputRef.current?.focus()
           searchInputRef.current?.select()
         }, 50)
+      } else if (event.shiftKey && event.altKey && (event.key === "F" || event.key === "f")) {
+        event.preventDefault()
+        handleFormatCode()
+      } else if (event.altKey && (event.key === "z" || event.key === "Z")) {
+        event.preventDefault()
+        handleToggleWordWrap()
       } else if ((event.ctrlKey || event.metaKey) && (event.key === "b" || event.key === "B")) {
         event.preventDefault()
         setSidebarOpen((s) => !s)
@@ -1280,7 +1440,7 @@ function App() {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [handleRunCode])
+  }, [handleRunCode, handleFormatCode, handleToggleWordWrap])
 
   /*
    * Draggable sidebar & terminal resizers.
@@ -1348,6 +1508,42 @@ function App() {
     monacoRef.current = monaco
 
     bindEditorToFile(activeFileRef.current)
+
+    // Register Document Formatting Edit Providers
+    const supportedLangs = [
+      "javascript", "typescript", "html", "css", "json", "python",
+      "java", "cpp", "c", "csharp", "go", "rust", "php", "sql"
+    ]
+    supportedLangs.forEach((l) => {
+      try {
+        monaco.languages.registerDocumentFormattingEditProvider(l, {
+          provideDocumentFormattingEdits(model) {
+            const currentCode = model.getValue()
+            const formatted = formatDocument(currentCode, l, { tabSize })
+            return [
+              {
+                range: model.getFullModelRange(),
+                text: formatted
+              }
+            ]
+          }
+        })
+      } catch (err) {
+        // Provider already registered
+      }
+    })
+
+    editor.addAction({
+      id: "syncstream-format-document",
+      label: "Format Document",
+      keybindings: [
+        monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF,
+        monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KEY_F
+      ],
+      run: () => {
+        handleFormatCode()
+      }
+    })
 
     editor.onDidChangeCursorPosition((event) => {
       const position = event.position
@@ -2385,7 +2581,23 @@ function App() {
               className="tree-inline-input"
             />
           ) : (
-            <span className="truncate">{node.name}</span>
+            <div className="flex items-center gap-1.5 min-w-0 flex-1 justify-between pr-1">
+              <span className="truncate">{node.name}</span>
+              {gitStatusMap[node.path] && (
+                <span
+                  className={`git-badge ${
+                    gitStatusMap[node.path] === "M"
+                      ? "git-badge-modified"
+                      : gitStatusMap[node.path] === "U"
+                      ? "git-badge-untracked"
+                      : "git-badge-deleted"
+                  }`}
+                  title={gitStatusMap[node.path] === "M" ? "Modified" : "Untracked"}
+                >
+                  {gitStatusMap[node.path]}
+                </span>
+              )}
+            </div>
           )}
         </div>
 
@@ -2623,6 +2835,18 @@ function App() {
             Template
           </button>
 
+          <button
+            type="button"
+            onClick={handleFormatCode}
+            title="Format Document (Shift+Alt+F)"
+            className="px-2.5 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition flex items-center gap-1.5"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h10M4 18h14" />
+            </svg>
+            <span>Format</span>
+          </button>
+
           {isWebContext && (
             <button
               type="button"
@@ -2761,6 +2985,29 @@ function App() {
               <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (activeActivityTab === "git" && sidebarOpen) {
+                  setSidebarOpen(false)
+                } else {
+                  setActiveActivityTab("git")
+                  setSidebarOpen(true)
+                }
+              }}
+              title="Source Control"
+              className={`activity-bar-btn ${sidebarOpen && activeActivityTab === "git" ? "active" : ""}`}
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="18" cy="18" r="3" />
+                <circle cx="6" cy="6" r="3" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 9v12m12-9a9 9 0 00-9-9" />
+              </svg>
+              {gitChanges.length > 0 && activeActivityTab !== "git" && (
+                <span className="activity-bar-badge">{gitChanges.length}</span>
+              )}
             </button>
 
             <button
@@ -3213,6 +3460,133 @@ function App() {
               </div>
             )}
 
+            {/* View: Source Control (Git) */}
+            {activeActivityTab === "git" && (
+              <div className="sidebar-git-container">
+                <div className="sidebar-title-header">
+                  <span>Source Control</span>
+                  <div className="flex items-center gap-1.5 text-[#58a6ff] text-[11px] font-normal normal-case">
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="6" y1="3" x2="6" y2="15" />
+                      <circle cx="18" cy="6" r="3" />
+                      <circle cx="6" cy="18" r="3" />
+                      <path d="M18 9a9 9 0 0 1-9 9" />
+                    </svg>
+                    <span>main</span>
+                  </div>
+                </div>
+
+                {/* Commit Input Box */}
+                <form onSubmit={handleCommit} className="sidebar-git-commit-box">
+                  <textarea
+                    placeholder="Message (Ctrl+Enter to commit)"
+                    value={gitCommitMessage}
+                    onChange={(e) => setGitCommitMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                        handleCommit(e)
+                      }
+                    }}
+                    className="sidebar-git-commit-input"
+                  />
+                  <button
+                    type="submit"
+                    disabled={gitChanges.length === 0}
+                    className="sidebar-git-commit-btn"
+                  >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    <span>Commit ({gitChanges.length})</span>
+                  </button>
+                </form>
+
+                {/* Changed Files Section */}
+                <div className="tree-section-header">
+                  <span className="uppercase text-[10px] tracking-wider">
+                    CHANGES ({gitChanges.length})
+                  </span>
+                </div>
+
+                <div className="flex-1 overflow-y-auto">
+                  {gitChanges.length === 0 ? (
+                    <div className="p-4 text-center text-[#8b949e] text-xs">
+                      No uncommitted changes in workspace.
+                    </div>
+                  ) : (
+                    <div className="flex flex-col py-1">
+                      {gitChanges.map((change) => (
+                        <div
+                          key={change.filePath}
+                          onClick={() => {
+                            if (change.status !== "D") {
+                              handleSelectFile(change.filePath)
+                            }
+                          }}
+                          className={`tree-node group ${activeFile === change.filePath ? "active" : ""}`}
+                        >
+                          <div className="tree-node-label">
+                            <span className="text-xs">{getFileIcon(change.filePath)}</span>
+                            <span className="truncate">{change.filePath}</span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              title={`Discard changes in ${change.filePath}`}
+                              onClick={(e) => handleDiscardChange(change.filePath, change.status, e)}
+                              className="tree-action-btn"
+                            >
+                              <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 0 1 5 5v2m0 0l-3-3m3 3l3-3M3 10l3 3m-3-3l3-3" />
+                              </svg>
+                            </button>
+                            <span
+                              className={`git-badge ${
+                                change.status === "M"
+                                  ? "git-badge-modified"
+                                  : change.status === "U"
+                                  ? "git-badge-untracked"
+                                  : "git-badge-deleted"
+                              }`}
+                            >
+                              {change.status}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Commit History Log */}
+                  {commitsList.length > 0 && (
+                    <>
+                      <div className="tree-section-header mt-2">
+                        <span className="uppercase text-[10px] tracking-wider">
+                          COMMITS ({commitsList.length})
+                        </span>
+                      </div>
+                      <div className="flex flex-col p-2 gap-1.5">
+                        {[...commitsList].reverse().map((commit) => (
+                          <div
+                            key={commit.id}
+                            className="p-2 rounded bg-[#161b22] border border-[#21262d] text-xs flex flex-col gap-1"
+                          >
+                            <div className="flex items-center justify-between text-[#8b949e] text-[10px]">
+                              <span className="font-mono text-[#58a6ff]">{commit.id}</span>
+                              <span>{new Date(commit.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                            </div>
+                            <div className="text-[#f0f6fc] font-medium leading-snug">{commit.message}</div>
+                            <div className="text-[#8b949e] text-[10px]">by {commit.author}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* View 3: Room Chat (Full Height in Sidebar - Never cut by dock!) */}
             {activeActivityTab === "chat" && (
               <div className="sidebar-chat-container">
@@ -3408,7 +3782,7 @@ function App() {
                           scrollBeyondLastLine: false,
                           fontSize: 13.5,
                           fontFamily: "Consolas, 'Menlo', monospace",
-                          tabSize: 4,
+                          tabSize: tabSize,
                           padding: { top: 8, bottom: 8 },
                           renderLineHighlight: "all",
                           cursorBlinking: "smooth",
@@ -3417,7 +3791,7 @@ function App() {
                           guides: { bracketPairs: true, indentation: true },
                           renderWhitespace: "selection",
                           lineNumbersMinChars: 3,
-                          wordWrap: "on"
+                          wordWrap: wordWrap
                         }}
                       />
                     </div>
@@ -3546,7 +3920,22 @@ function App() {
 
                   <span>Ln {cursorPos.lineNumber}, Col {cursorPos.column}</span>
                   <span>UTF-8</span>
-                  <span>Spaces: 4</span>
+                  <button
+                    type="button"
+                    onClick={() => setTabSize((prev) => (prev === 4 ? 2 : 4))}
+                    title="Click to toggle Indentation (2 vs 4 spaces)"
+                    className="hover:text-[#58a6ff] cursor-pointer transition-colors"
+                  >
+                    Spaces: {tabSize}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleToggleWordWrap}
+                    title="Click or press Alt+Z to toggle Word Wrap"
+                    className="hover:text-[#58a6ff] cursor-pointer transition-colors"
+                  >
+                    Wrap: {wordWrap.toUpperCase()}
+                  </button>
                 </div>
 
                 <div className="flex items-center gap-3">
