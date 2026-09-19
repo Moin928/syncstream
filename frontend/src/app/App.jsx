@@ -16,6 +16,7 @@ import {
   SEVERITY
 } from "../diagnostics"
 import { formatDocument } from "../formatting"
+import { registerCompletionProviders } from "../completions"
 
 function getLanguageFromFileName(filename) {
   if (!filename) return "javascript"
@@ -1606,6 +1607,9 @@ function App() {
     monacoRef.current = monaco
 
     bindEditorToFile(activeFileRef.current)
+
+    // Register Multi-Language Code Completion Providers (Python, Java, C++, Go, Rust, C#, etc.)
+    registerCompletionProviders(monaco)
 
     // Register Document Formatting Edit Providers
     const supportedLangs = [
