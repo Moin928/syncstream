@@ -17,6 +17,7 @@ import {
 } from "../diagnostics"
 import { formatDocument } from "../formatting"
 import { registerCompletionProviders } from "../completions"
+import { renderMarkdown } from "../markdown"
 
 function getLanguageFromFileName(filename) {
   if (!filename) return "javascript"
@@ -39,6 +40,7 @@ function getLanguageFromFileName(filename) {
     case "css": return "css"
     case "json": return "json"
     case "sql": return "sql"
+    case "md": case "markdown": return "markdown"
     default: return "plaintext"
   }
 }
@@ -62,6 +64,7 @@ function getFileNameForLanguage(language) {
     case "html": return "index.html"
     case "css": return "style.css"
     case "json": return "data.json"
+    case "markdown": case "md": return "README.md"
     default: return "main.txt"
   }
 }
@@ -138,6 +141,10 @@ function getFileIcon(filename) {
     case "sql":
       dotColor = "#e38c00"
       label = "sql"
+      break
+    case "markdown":
+      dotColor = "#083fa1"
+      label = "md"
       break
     default:
       dotColor = "#8b949e"
@@ -303,6 +310,28 @@ function generateWebPreviewBundle(files, activeFile) {
   return outputHtml
 }
 
+const USER_COLORS = [
+  "#f85149",
+  "#d29922",
+  "#3fb950",
+  "#58a6ff",
+  "#bc8cff",
+  "#f0883e",
+  "#2ea043",
+  "#a371f7",
+  "#39c5bb",
+  "#e36209"
+]
+
+function getUserColor(name) {
+  if (!name) return "#58a6ff"
+  let hash = 0
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  return USER_COLORS[Math.abs(hash) % USER_COLORS.length]
+}
+
 function App() {
   const editorRef = useRef(null)
   const monacoRef = useRef(null)
@@ -456,6 +485,12 @@ function App() {
   // Advanced Share & Embed Dialog Modal
   const [shareModalOpen, setShareModalOpen] = useState(false)
   const [copiedKey, setCopiedKey] = useState(null)
+
+  // Live Markdown Preview (.md / .markdown files)
+  const [markdownPreviewOpen, setMarkdownPreviewOpen] = useState(false)
+
+  // Keyboard Shortcuts Cheat-Sheet Modal (Ctrl+/)
+  const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false)
 
   const languageRef = useRef(language)
   const validateCodeRef = useRef(null)
@@ -1005,6 +1040,7 @@ function App() {
               if (!this.domNode) {
                 const node = document.createElement("div")
                 node.className = "remote-cursor-label"
+                node.style.backgroundColor = getUserColor(this.username)
                 node.textContent = this.username
                 this.domNode = node
               }
@@ -1024,6 +1060,7 @@ function App() {
           widget.username = cursor.username
           if (widget.domNode) {
             widget.domNode.textContent = cursor.username
+            widget.domNode.style.backgroundColor = getUserColor(cursor.username)
           }
           editor.layoutContentWidget(widget)
         }
@@ -1649,6 +1686,19 @@ function App() {
       action: () => setSettingsModalOpen(true)
     },
     {
+      id: "shortcuts",
+      label: "Help: Keyboard Shortcuts Reference",
+      icon: "⌨️",
+      shortcut: "Ctrl+/",
+      action: () => setShortcutsModalOpen(true)
+    },
+    {
+      id: "toggleMarkdown",
+      label: "View: Toggle Markdown Live Preview",
+      icon: "👁️",
+      action: () => setMarkdownPreviewOpen((p) => !p)
+    },
+    {
       id: "share",
       label: "Room: Share Invite Link",
       icon: "🔗",
@@ -1727,6 +1777,7 @@ function App() {
    * Global Keyboard shortcuts:
    * - Ctrl+P (Quick Open)
    * - Ctrl+Shift+P / F1 (Command Palette)
+   * - Ctrl+/ (Keyboard Shortcuts Cheat-Sheet)
    * - Escape (Close Palettes / Modals)
    * - Ctrl+` (Toggle Terminal)
    * - Ctrl+Enter / F5 (Run)
@@ -1756,10 +1807,21 @@ function App() {
           setSettingsModalOpen(false)
           return
         }
+        if (shortcutsModalOpen) {
+          setShortcutsModalOpen(false)
+          return
+        }
         if (shareModalOpen) {
           setShareModalOpen(false)
           return
         }
+      }
+
+      // Ctrl+/ : Toggle Keyboard Shortcuts Cheat-Sheet
+      if ((event.ctrlKey || event.metaKey) && event.key === "/") {
+        event.preventDefault()
+        setShortcutsModalOpen((prev) => !prev)
+        return
       }
 
       // Ctrl+Shift+P or F1: Command Palette
@@ -1816,6 +1878,9 @@ function App() {
     paletteMode,
     diffModalFile,
     settingsModalOpen,
+    shortcutsModalOpen,
+    shareModalOpen,
+    contextMenu,
     handleRunCode,
     handleFormatCode,
     handleToggleWordWrap
@@ -3443,6 +3508,33 @@ function App() {
             </div>
           )}
 
+          {/* Collaborator Presence Avatar Stack */}
+          {users.length > 0 && (
+            <div className="flex items-center -space-x-1.5 mr-1" title={`${users.length} collaborator${users.length === 1 ? "" : "s"} online`}>
+              {users.slice(0, 6).map((u) => {
+                const uColor = getUserColor(u.username)
+                return (
+                  <div
+                    key={u.clientId || u.username}
+                    className="presence-avatar-circle"
+                    style={{ backgroundColor: uColor }}
+                    title={`${u.username} (${rolesMap[u.username] || "editor"})`}
+                  >
+                    {(u.username || "U").charAt(0).toUpperCase()}
+                  </div>
+                )
+              })}
+              {users.length > 6 && (
+                <div
+                  className="presence-avatar-circle bg-[#21262d] text-[#8b949e]"
+                  title={`${users.length - 6} more collaborators`}
+                >
+                  +{users.length - 6}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#0d1117] border border-[#30363d] text-[11px]">
             <span
               className={`w-2 h-2 rounded-full ${
@@ -3459,6 +3551,16 @@ function App() {
             className="px-2.5 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition"
           >
             Share
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShortcutsModalOpen(true)}
+            className="px-2 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition flex items-center gap-1"
+            title="Keyboard Shortcuts Cheat-Sheet (Ctrl+/ or ?)"
+          >
+            <span className="font-bold text-xs">?</span>
+            <span>Shortcuts</span>
           </button>
 
           <button
@@ -4408,21 +4510,52 @@ function App() {
 
               {/* VS Code Breadcrumbs Bar */}
               {activeFile && (
-                <div className="editor-breadcrumbs">
-                  <span>{room || "workspace"}</span>
-                  <span>›</span>
-                  {activeFile.split("/").map((part, idx, arr) => (
-                    <span key={idx} className="flex items-center gap-1.5">
-                      <span className={idx === arr.length - 1 ? "text-[#f0f6fc] font-medium" : ""}>
-                        {part}
+                <div className="editor-breadcrumbs flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 overflow-hidden">
+                    <span>{room || "workspace"}</span>
+                    <span>›</span>
+                    {activeFile.split("/").map((part, idx, arr) => (
+                      <span key={idx} className="flex items-center gap-1.5 truncate">
+                        <span className={idx === arr.length - 1 ? "text-[#f0f6fc] font-medium" : ""}>
+                          {part}
+                        </span>
+                        {idx < arr.length - 1 && <span>›</span>}
                       </span>
-                      {idx < arr.length - 1 && <span>›</span>}
-                    </span>
-                  ))}
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {(activeFile.endsWith(".md") || activeFile.endsWith(".markdown")) && (
+                      <button
+                        type="button"
+                        onClick={() => setMarkdownPreviewOpen((p) => !p)}
+                        className={`px-2 py-0.5 rounded text-[11px] font-medium border transition flex items-center gap-1 ${
+                          markdownPreviewOpen
+                            ? "bg-[#1f6feb] text-white border-[#388bfd]"
+                            : "bg-[#21262d] text-[#c9d1d9] hover:bg-[#30363d] border-[#30363d]"
+                        }`}
+                        title="Toggle Markdown Live Preview"
+                      >
+                        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                        <span>{markdownPreviewOpen ? "Hide Preview" : "Preview Markdown"}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleFormatCode}
+                      className="px-2 py-0.5 rounded text-[11px] text-[#8b949e] hover:text-[#c9d1d9] bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] transition"
+                      title="Format Document (Shift+Alt+F)"
+                    >
+                      Format
+                    </button>
+                  </div>
                 </div>
               )}
 
-              {/* Split Editor and Live Web Preview Container */}
+              {/* Split Editor and Live Web / Markdown Preview Container */}
               <div className="preview-split-container">
                 {/* When No Tabs Open */}
                 {(!activeFile || openTabs.length === 0) ? (
@@ -4447,7 +4580,7 @@ function App() {
                 ) : (
                   <>
                     {/* Monaco Editor */}
-                    <div className={previewOpen ? "w-1/2 min-h-0 flex flex-col" : "flex-1 min-h-0 flex flex-col"}>
+                    <div className={(previewOpen || (markdownPreviewOpen && (activeFile?.endsWith(".md") || activeFile?.endsWith(".markdown")))) ? "w-1/2 min-h-0 flex flex-col" : "flex-1 min-h-0 flex flex-col"}>
                       <Editor
                         height="100%"
                         language={language}
@@ -4475,6 +4608,32 @@ function App() {
                       />
                     </div>
                   </>
+                )}
+
+                {/* Live Markdown Preview Panel */}
+                {markdownPreviewOpen && activeFile && (activeFile.endsWith(".md") || activeFile.endsWith(".markdown")) && (
+                  <div className="markdown-preview-container">
+                    <div className="markdown-preview-header">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-[#f0f6fc]">Markdown Live Preview</span>
+                        <span className="text-[11px] text-[#8b949e]">({activeFile})</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setMarkdownPreviewOpen(false)}
+                        title="Close Markdown Preview"
+                        className="terminal-action-btn"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div
+                      className="markdown-preview-content"
+                      dangerouslySetInnerHTML={{
+                        __html: renderMarkdown(ydoc.getText("file:" + activeFile).toString())
+                      }}
+                    />
+                  </div>
                 )}
 
                 {/* Live Web Preview Panel */}
@@ -5330,6 +5489,108 @@ function App() {
                   >
                     {copiedKey === "embed" ? "✓ Copied" : "Copy Embed"}
                   </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 9. Keyboard Shortcuts Cheat-Sheet Modal (Ctrl+/) */}
+      {shortcutsModalOpen && (
+        <div className="diff-modal-overlay" onClick={() => setShortcutsModalOpen(false)}>
+          <div className="shortcuts-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="shortcuts-modal-header">
+              <div className="flex items-center gap-2">
+                <span>⌨️</span>
+                <span>Keyboard Shortcuts Reference</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShortcutsModalOpen(false)}
+                className="terminal-action-btn"
+                title="Close (Esc)"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="shortcuts-modal-body">
+              <div className="shortcuts-grid">
+                {/* General Navigation */}
+                <div className="shortcut-category-card">
+                  <span className="shortcut-category-title">General Navigation</span>
+                  <div className="shortcut-item-row">
+                    <span>Quick Open File</span>
+                    <kbd className="shortcut-kbd">Ctrl + P</kbd>
+                  </div>
+                  <div className="shortcut-item-row">
+                    <span>Command Palette</span>
+                    <kbd className="shortcut-kbd">Ctrl + Shift + P / F1</kbd>
+                  </div>
+                  <div className="shortcut-item-row">
+                    <span>Toggle File Explorer</span>
+                    <kbd className="shortcut-kbd">Ctrl + B</kbd>
+                  </div>
+                  <div className="shortcut-item-row">
+                    <span>Global Search & Replace</span>
+                    <kbd className="shortcut-kbd">Ctrl + Shift + F</kbd>
+                  </div>
+                </div>
+
+                {/* Execution & Terminal */}
+                <div className="shortcut-category-card">
+                  <span className="shortcut-category-title">Execution & Terminal</span>
+                  <div className="shortcut-item-row">
+                    <span>Run Code / Project</span>
+                    <kbd className="shortcut-kbd">Ctrl + Enter / F5</kbd>
+                  </div>
+                  <div className="shortcut-item-row">
+                    <span>Toggle Terminal Panel</span>
+                    <kbd className="shortcut-kbd">Ctrl + `</kbd>
+                  </div>
+                  <div className="shortcut-item-row">
+                    <span>Commit Changes (Git)</span>
+                    <kbd className="shortcut-kbd">Ctrl + Enter</kbd>
+                  </div>
+                </div>
+
+                {/* Editor & Formatting */}
+                <div className="shortcut-category-card">
+                  <span className="shortcut-category-title">Editor & Formatting</span>
+                  <div className="shortcut-item-row">
+                    <span>Format Document</span>
+                    <kbd className="shortcut-kbd">Shift + Alt + F</kbd>
+                  </div>
+                  <div className="shortcut-item-row">
+                    <span>IntelliSense Autocomplete</span>
+                    <kbd className="shortcut-kbd">Ctrl + Space</kbd>
+                  </div>
+                  <div className="shortcut-item-row">
+                    <span>Toggle Word Wrap</span>
+                    <kbd className="shortcut-kbd">Alt + Z</kbd>
+                  </div>
+                  <div className="shortcut-item-row">
+                    <span>Keyboard Shortcuts</span>
+                    <kbd className="shortcut-kbd">Ctrl + /</kbd>
+                  </div>
+                </div>
+
+                {/* Collaboration & Panels */}
+                <div className="shortcut-category-card">
+                  <span className="shortcut-category-title">Collaboration & Views</span>
+                  <div className="shortcut-item-row">
+                    <span>Toggle Markdown Preview</span>
+                    <kbd className="shortcut-kbd">Toolbar (.md)</kbd>
+                  </div>
+                  <div className="shortcut-item-row">
+                    <span>Toggle Web Preview</span>
+                    <kbd className="shortcut-kbd">Activity Bar</kbd>
+                  </div>
+                  <div className="shortcut-item-row">
+                    <span>Close Active Modal / Tab</span>
+                    <kbd className="shortcut-kbd">Escape</kbd>
+                  </div>
                 </div>
               </div>
             </div>
