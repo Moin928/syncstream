@@ -450,6 +450,13 @@ function App() {
   const [editorMinimap, setEditorMinimap] = useState(false)
   const [settingsModalOpen, setSettingsModalOpen] = useState(false)
 
+  // Floating Context Menu (Tabs & Explorer)
+  const [contextMenu, setContextMenu] = useState(null) // { type: "tab"|"explorer", x, y, target, isDirectory? }
+
+  // Advanced Share & Embed Dialog Modal
+  const [shareModalOpen, setShareModalOpen] = useState(false)
+  const [copiedKey, setCopiedKey] = useState(null)
+
   const languageRef = useRef(language)
   const validateCodeRef = useRef(null)
   const isRunningRef = useRef(isRunning)
@@ -537,14 +544,19 @@ function App() {
   }, [yroles])
 
   /*
-   * Assign initial Owner / Editor role upon document sync.
+   * Assign initial Owner / Editor / Viewer role upon document sync.
    */
   useEffect(() => {
     if (documentReady && username) {
+      const urlRole = new URLSearchParams(window.location.search).get("role")
       if (yroles.size === 0) {
         yroles.set(username, "owner")
       } else if (!yroles.has(username)) {
-        yroles.set(username, "editor")
+        if (urlRole === "viewer") {
+          yroles.set(username, "viewer")
+        } else {
+          yroles.set(username, "editor")
+        }
       }
     }
   }, [documentReady, username, yroles])
@@ -1725,8 +1737,12 @@ function App() {
    */
   useEffect(() => {
     const handleKeyDown = (event) => {
-      // Escape closes modals
+      // Escape closes modals and menus
       if (event.key === "Escape") {
+        if (contextMenu) {
+          setContextMenu(null)
+          return
+        }
         if (paletteMode) {
           setPaletteMode(null)
           setPaletteQuery("")
@@ -1738,6 +1754,10 @@ function App() {
         }
         if (settingsModalOpen) {
           setSettingsModalOpen(false)
+          return
+        }
+        if (shareModalOpen) {
+          setShareModalOpen(false)
           return
         }
       }
@@ -2259,6 +2279,87 @@ function App() {
     }
   }
 
+  const handleCloseOtherTabs = (fileName) => {
+    setOpenTabs([fileName])
+    setActiveFile(fileName)
+    setContextMenu(null)
+  }
+
+  const handleCloseTabsToRight = (fileName) => {
+    const idx = openTabs.indexOf(fileName)
+    if (idx !== -1) {
+      const remainingTabs = openTabs.slice(0, idx + 1)
+      setOpenTabs(remainingTabs)
+      if (!remainingTabs.includes(activeFile)) {
+        setActiveFile(fileName)
+      }
+    }
+    setContextMenu(null)
+  }
+
+  const handleCloseAllTabs = () => {
+    setOpenTabs([])
+    setActiveFile("")
+    setContextMenu(null)
+  }
+
+  const handleDuplicateFile = (filePath) => {
+    const content = ydoc.getText("file:" + filePath).toString()
+    const lastDot = filePath.lastIndexOf(".")
+    let newPath = ""
+    if (lastDot !== -1) {
+      newPath = `${filePath.substring(0, lastDot)}_copy${filePath.substring(lastDot)}`
+    } else {
+      newPath = `${filePath}_copy`
+    }
+
+    // Ensure unique name if _copy already exists
+    let counter = 2
+    while (yfiles.has(newPath)) {
+      if (lastDot !== -1) {
+        newPath = `${filePath.substring(0, lastDot)}_copy${counter}${filePath.substring(lastDot)}`
+      } else {
+        newPath = `${filePath}_copy${counter}`
+      }
+      counter++
+    }
+
+    const fileLang = getLanguageFromFileName(newPath)
+    ydoc.transact(() => {
+      yfiles.set(newPath, { name: newPath, language: fileLang })
+      const newYText = ydoc.getText("file:" + newPath)
+      newYText.insert(0, content)
+    })
+
+    setOpenTabs((prev) => (prev.includes(newPath) ? prev : [...prev, newPath]))
+    setActiveFile(newPath)
+    setContextMenu(null)
+  }
+
+  const handleDownloadFile = (filePath) => {
+    try {
+      const content = ydoc.getText("file:" + filePath).toString()
+      const fileName = filePath.split("/").pop() || "file.txt"
+      const blob = new Blob([content], { type: "text/plain;charset=utf-8" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("Failed to download file", err)
+    }
+    setContextMenu(null)
+  }
+
+  const handleCopyPath = (filePath) => {
+    navigator.clipboard.writeText(filePath)
+    setContextMenu(null)
+  }
+
   const handleRenameNode = (oldPath, newName, isDirectory = false) => {
     const trimmed = newName.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
     const oldName = oldPath.split("/").pop()
@@ -2720,18 +2821,48 @@ function App() {
     }
   }
 
-  const handleShareRoom = async () => {
+  const handleShareRoom = () => {
+    setShareModalOpen(true)
+  }
+
+  const handleCopyShareLink = async (key, text) => {
     try {
-      await navigator.clipboard.writeText(window.location.href)
-      setShareMessage("Room link copied")
+      await navigator.clipboard.writeText(text)
+      setCopiedKey(key)
       setTimeout(() => {
-        setShareMessage("")
+        setCopiedKey(null)
       }, 2000)
-    } catch (error) {
-      console.error("Failed to copy room link", error)
-      setShareMessage("Failed to copy link")
+    } catch (err) {
+      console.error("Failed to copy link", err)
     }
   }
+
+  const workspaceMetrics = useMemo(() => {
+    const files = Array.from(yfiles.keys()).filter(
+      (f) => !f.endsWith(".keep") || yfiles.size === 1
+    )
+    let totalLines = 0
+    let totalBytes = 0
+    files.forEach((f) => {
+      const text = ydoc.getText("file:" + f).toString()
+      totalLines += text ? text.split("\n").length : 0
+      totalBytes += text.length
+    })
+    return {
+      fileCount: files.length,
+      totalLines,
+      totalKB: (totalBytes / 1024).toFixed(1),
+      userCount: users.length
+    }
+  }, [yfiles, ydoc, users.length, contentRevision])
+
+  useEffect(() => {
+    const handleGlobalClick = () => {
+      setContextMenu(null)
+    }
+    window.addEventListener("click", handleGlobalClick)
+    return () => window.removeEventListener("click", handleGlobalClick)
+  }, [])
 
   const handleLeaveRoom = () => {
     setJoined(false)
@@ -2767,6 +2898,17 @@ function App() {
           <div
             onClick={(e) => {
               if (!isRenaming) toggleFolder(node.path, e)
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setContextMenu({
+                type: "explorer",
+                x: e.clientX,
+                y: e.clientY,
+                target: node.path,
+                isDirectory: true
+              })
             }}
             style={{ paddingLeft: `${depth * 14 + 10}px` }}
             className="tree-node group"
@@ -2912,6 +3054,17 @@ function App() {
         key={node.path}
         onClick={() => {
           if (!isRenaming) handleSelectFile(node.path)
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setContextMenu({
+            type: "explorer",
+            x: e.clientX,
+            y: e.clientY,
+            target: node.path,
+            isDirectory: false
+          })
         }}
         style={{ paddingLeft: `${depth * 14 + 16}px` }}
         className={`tree-node group ${isActive ? "active" : ""}`}
@@ -4228,6 +4381,16 @@ function App() {
                   <div
                     key={fname}
                     onClick={() => setActiveFile(fname)}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setContextMenu({
+                        type: "tab",
+                        x: e.clientX,
+                        y: e.clientY,
+                        target: fname
+                      })
+                    }}
                     className={`editor-tab ${activeFile === fname ? "active" : ""}`}
                   >
                     <span>{getFileIcon(fname)}</span>
@@ -4848,6 +5011,326 @@ function App() {
                 >
                   {wordWrap.toUpperCase()}
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7. Floating Context Menu (Tabs & Explorer) */}
+      {contextMenu && (
+        <div
+          className="context-menu-container"
+          style={{
+            top: `${Math.min(contextMenu.y, window.innerHeight - 260)}px`,
+            left: `${Math.min(contextMenu.x, window.innerWidth - 210)}px`
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {contextMenu.type === "tab" ? (
+            <>
+              <div
+                className="context-menu-item"
+                onClick={() => {
+                  handleCloseTab(contextMenu.target)
+                  setContextMenu(null)
+                }}
+              >
+                <span>✕</span>
+                <span>Close Tab</span>
+              </div>
+              <div
+                className="context-menu-item"
+                onClick={() => handleCloseOtherTabs(contextMenu.target)}
+              >
+                <span>⊞</span>
+                <span>Close Others</span>
+              </div>
+              <div
+                className="context-menu-item"
+                onClick={() => handleCloseTabsToRight(contextMenu.target)}
+              >
+                <span>⇥</span>
+                <span>Close to the Right</span>
+              </div>
+              <div
+                className="context-menu-item"
+                onClick={() => handleCloseAllTabs()}
+              >
+                <span>✕✕</span>
+                <span>Close All Tabs</span>
+              </div>
+              <div className="context-menu-divider" />
+              <div
+                className="context-menu-item"
+                onClick={() => handleDuplicateFile(contextMenu.target)}
+              >
+                <span>📄</span>
+                <span>Duplicate File</span>
+              </div>
+              <div
+                className="context-menu-item"
+                onClick={() => handleDownloadFile(contextMenu.target)}
+              >
+                <span>📥</span>
+                <span>Download File</span>
+              </div>
+              <div
+                className="context-menu-item"
+                onClick={() => handleCopyPath(contextMenu.target)}
+              >
+                <span>📋</span>
+                <span>Copy Relative Path</span>
+              </div>
+            </>
+          ) : (
+            <>
+              {contextMenu.isDirectory ? (
+                <>
+                  {!isViewer && (
+                    <>
+                      <div
+                        className="context-menu-item"
+                        onClick={() => {
+                          setIsCreatingNode({ type: "file", parentPath: contextMenu.target })
+                          setExpandedFolders((prev) => new Set([...prev, contextMenu.target]))
+                          setContextMenu(null)
+                        }}
+                      >
+                        <span>+</span>
+                        <span>New File Inside</span>
+                      </div>
+                      <div
+                        className="context-menu-item"
+                        onClick={() => {
+                          setIsCreatingNode({ type: "folder", parentPath: contextMenu.target })
+                          setExpandedFolders((prev) => new Set([...prev, contextMenu.target]))
+                          setContextMenu(null)
+                        }}
+                      >
+                        <span>📁</span>
+                        <span>New Folder Inside</span>
+                      </div>
+                      <div className="context-menu-divider" />
+                      <div
+                        className="context-menu-item"
+                        onClick={() => {
+                          const nodeName = contextMenu.target.split("/").pop()
+                          setRenamingNode({ path: contextMenu.target, name: nodeName, isDirectory: true })
+                          setRenameInput(nodeName)
+                          setContextMenu(null)
+                        }}
+                      >
+                        <span>✎</span>
+                        <span>Rename Folder</span>
+                      </div>
+                      <div
+                        className="context-menu-item danger"
+                        onClick={() => {
+                          handleDeleteFolder(contextMenu.target)
+                          setContextMenu(null)
+                        }}
+                      >
+                        <span>🗑</span>
+                        <span>Delete Folder</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="context-menu-divider" />
+                  <div
+                    className="context-menu-item"
+                    onClick={() => handleCopyPath(contextMenu.target)}
+                  >
+                    <span>📋</span>
+                    <span>Copy Path</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div
+                    className="context-menu-item"
+                    onClick={() => {
+                      handleSelectFile(contextMenu.target)
+                      setContextMenu(null)
+                    }}
+                  >
+                    <span>📂</span>
+                    <span>Open File</span>
+                  </div>
+                  <div
+                    className="context-menu-item"
+                    onClick={() => handleDuplicateFile(contextMenu.target)}
+                  >
+                    <span>📄</span>
+                    <span>Duplicate File</span>
+                  </div>
+                  <div
+                    className="context-menu-item"
+                    onClick={() => handleDownloadFile(contextMenu.target)}
+                  >
+                    <span>📥</span>
+                    <span>Download File</span>
+                  </div>
+                  {!isViewer && (
+                    <>
+                      <div className="context-menu-divider" />
+                      <div
+                        className="context-menu-item"
+                        onClick={() => {
+                          const nodeName = contextMenu.target.split("/").pop()
+                          setRenamingNode({ path: contextMenu.target, name: nodeName, isDirectory: false })
+                          setRenameInput(nodeName)
+                          setContextMenu(null)
+                        }}
+                      >
+                        <span>✎</span>
+                        <span>Rename</span>
+                      </div>
+                      <div
+                        className="context-menu-item danger"
+                        onClick={() => {
+                          handleDeleteFile(contextMenu.target)
+                          setContextMenu(null)
+                        }}
+                      >
+                        <span>🗑</span>
+                        <span>Delete File</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="context-menu-divider" />
+                  <div
+                    className="context-menu-item"
+                    onClick={() => handleCopyPath(contextMenu.target)}
+                  >
+                    <span>📋</span>
+                    <span>Copy Relative Path</span>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 8. Advanced Share & Embed Dialog Modal */}
+      {shareModalOpen && (
+        <div className="diff-modal-overlay" onClick={() => setShareModalOpen(false)}>
+          <div className="share-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="share-modal-header">
+              <div className="flex items-center gap-2">
+                <span>🔗</span>
+                <span>Share Workspace & Invite Collaborators</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShareModalOpen(false)}
+                className="terminal-action-btn"
+                title="Close (Esc)"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="share-modal-body">
+              {/* Workspace Summary Stats */}
+              <div className="share-stats-grid">
+                <div className="share-stat-card">
+                  <span className="share-stat-val">{workspaceMetrics.userCount}</span>
+                  <span className="share-stat-lbl">Active Users</span>
+                </div>
+                <div className="share-stat-card">
+                  <span className="share-stat-val">{workspaceMetrics.fileCount}</span>
+                  <span className="share-stat-lbl">Workspace Files</span>
+                </div>
+                <div className="share-stat-card">
+                  <span className="share-stat-val">{workspaceMetrics.totalLines}</span>
+                  <span className="share-stat-lbl">Total Lines of Code</span>
+                </div>
+              </div>
+
+              {/* 1. Collaborate (Editor) Invite Link */}
+              <div className="share-section">
+                <div className="share-section-title">
+                  <span>Collaborate (Editor Link)</span>
+                  <span className="text-[10px] text-[#3fb950] font-normal">Full Read & Write Access</span>
+                </div>
+                <div className="share-link-box">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`${window.location.origin}${window.location.pathname}?room=${room}&role=editor`}
+                    className="share-link-input"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyShareLink(
+                        "editor",
+                        `${window.location.origin}${window.location.pathname}?room=${room}&role=editor`
+                      )
+                    }
+                    className={`share-copy-btn ${copiedKey === "editor" ? "copied" : ""}`}
+                  >
+                    {copiedKey === "editor" ? "✓ Copied" : "Copy Link"}
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. Read-Only (Viewer) Invite Link */}
+              <div className="share-section">
+                <div className="share-section-title">
+                  <span>Read-Only (Viewer Link)</span>
+                  <span className="text-[10px] text-[#8b949e] font-normal">Observer Mode (Read-Only)</span>
+                </div>
+                <div className="share-link-box">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`${window.location.origin}${window.location.pathname}?room=${room}&role=viewer`}
+                    className="share-link-input"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyShareLink(
+                        "viewer",
+                        `${window.location.origin}${window.location.pathname}?room=${room}&role=viewer`
+                      )
+                    }
+                    className={`share-copy-btn ${copiedKey === "viewer" ? "copied" : ""}`}
+                  >
+                    {copiedKey === "viewer" ? "✓ Copied" : "Copy Link"}
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. Embed HTML iFrame */}
+              <div className="share-section">
+                <div className="share-section-title">
+                  <span>Embed in Website / Documentation</span>
+                  <span className="text-[10px] text-[#8b949e] font-normal">&lt;iframe&gt; embed code</span>
+                </div>
+                <div className="share-link-box">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`<iframe src="${window.location.origin}${window.location.pathname}?room=${room}&role=viewer" width="100%" height="600" frameborder="0" allow="clipboard-write"></iframe>`}
+                    className="share-link-input"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyShareLink(
+                        "embed",
+                        `<iframe src="${window.location.origin}${window.location.pathname}?room=${room}&role=viewer" width="100%" height="600" frameborder="0" allow="clipboard-write"></iframe>`
+                      )
+                    }
+                    className={`share-copy-btn ${copiedKey === "embed" ? "copied" : ""}`}
+                  >
+                    {copiedKey === "embed" ? "✓ Copied" : "Copy Embed"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
