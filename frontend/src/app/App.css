@@ -1576,3 +1576,189 @@ select {
 .settings-select:focus {
   border-color: #58a6ff;
 }
+
+/* ==========================================================================
+   Floating Context Menu (Tabs & File Explorer)
+   ========================================================================== */
+.context-menu-container {
+  position: fixed;
+  z-index: 10000;
+  min-width: 180px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: context-menu-fade 0.08s ease-out;
+}
+
+@keyframes context-menu-fade {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #c9d1d9;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.06s ease;
+}
+
+.context-menu-item:hover {
+  background: #1f6feb;
+  color: #ffffff;
+}
+
+.context-menu-item.danger:hover {
+  background: #da3633;
+  color: #ffffff;
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: #21262d;
+  margin: 3px 0;
+}
+
+/* ==========================================================================
+   Advanced Share Dialog Modal
+   ========================================================================== */
+.share-modal {
+  width: 580px;
+  max-width: 92vw;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.8);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.share-modal-header {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: #0d1117;
+  border-bottom: 1px solid #21262d;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f0f6fc;
+}
+
+.share-modal-body {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.share-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.share-stat-card {
+  padding: 10px 12px;
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.share-stat-val {
+  font-size: 16px;
+  font-weight: 700;
+  color: #58a6ff;
+  font-family: Consolas, monospace;
+}
+
+.share-stat-lbl {
+  font-size: 10px;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.share-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.share-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #c9d1d9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.share-link-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+}
+
+.share-link-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  color: #8b949e;
+  user-select: all;
+}
+
+.share-copy-btn {
+  padding: 4px 10px;
+  background: #21262d;
+  hover:bg-[#30363d];
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.1s ease;
+}
+
+.share-copy-btn:hover {
+  background: #30363d;
+  color: #ffffff;
+  border-color: #8b949e;
+}
+
+.share-copy-btn.copied {
+  background: #238636;
+  color: #ffffff;
+  border-color: #2ea043;
+}
