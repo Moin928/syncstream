@@ -492,6 +492,9 @@ function App() {
   // Keyboard Shortcuts Cheat-Sheet Modal (Ctrl+/)
   const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false)
 
+  // Mobile Header Action Menu Drawer
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
   const languageRef = useRef(language)
   const validateCodeRef = useRef(null)
   const isRunningRef = useRef(isRunning)
@@ -3482,20 +3485,20 @@ function App() {
               setPaletteQuery("")
               setPaletteSelectedIndex(0)
             }}
-            className="flex items-center gap-2 px-3 py-1 bg-[#0d1117] hover:bg-[#21262d] border border-[#30363d] rounded text-xs text-[#8b949e] hover:text-[#c9d1d9] transition cursor-pointer"
+            className="flex items-center gap-2 px-2.5 sm:px-3 py-1 bg-[#0d1117] hover:bg-[#21262d] border border-[#30363d] rounded text-xs text-[#8b949e] hover:text-[#c9d1d9] transition cursor-pointer"
             title="Quick Open File (Ctrl+P)"
           >
             <svg className="w-3.5 h-3.5 text-[#8b949e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="8" />
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
-            <span>Search files...</span>
-            <kbd className="text-[10px] bg-[#161b22] px-1 py-0.2 rounded border border-[#30363d] text-[#8b949e]">Ctrl+P</kbd>
+            <span className="hidden sm:inline">Search files...</span>
+            <kbd className="hidden sm:inline text-[10px] bg-[#161b22] px-1 py-0.2 rounded border border-[#30363d] text-[#8b949e]">Ctrl+P</kbd>
           </button>
         </div>
 
-        {/* Right: User Presence, Share, Settings & Leave */}
-        <div className="flex items-center gap-2">
+        {/* Right: Desktop Actions & Presence */}
+        <div className="hidden md:flex items-center gap-2">
           {/* Follow Mode Status Indicator */}
           {followingUser && (
             <div
@@ -3600,10 +3603,120 @@ function App() {
             Leave
           </button>
         </div>
+
+        {/* Right: Mobile Header Toggle Button */}
+        <div className="flex md:hidden items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen((m) => !m)}
+            className="p-1.5 rounded bg-[#21262d] text-[#c9d1d9] border border-[#30363d]"
+            title="Toggle Menu"
+          >
+            {mobileMenuOpen ? (
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            )}
+          </button>
+        </div>
       </header>
 
+      {/* Mobile Header Menu Drawer */}
+      {mobileMenuOpen && (
+        <>
+          <div className="mobile-sidebar-backdrop md:hidden" onClick={() => setMobileMenuOpen(false)} />
+          <div className="mobile-header-menu md:hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between pb-2 border-b border-[#21262d]">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`w-2.5 h-2.5 rounded-full ${
+                    connectionState === "CONNECTED" ? "bg-[#3fb950]" : "bg-[#d29922]"
+                  }`}
+                />
+                <span className="font-semibold text-xs text-[#f0f6fc]">{username}</span>
+              </div>
+              <span className={`role-badge role-badge-${myRole}`}>{myRole}</span>
+            </div>
+
+            {users.length > 0 && (
+              <div className="flex flex-col gap-1.5 py-1 border-b border-[#21262d]">
+                <span className="text-[10px] uppercase font-bold text-[#8b949e]">
+                  Active Collaborators ({users.length})
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {users.map((u) => (
+                    <div
+                      key={u.clientId || u.username}
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#0d1117] border border-[#30363d] text-[11px]"
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: getUserColor(u.username) }}
+                      />
+                      <span className="text-[#c9d1d9]">{u.username}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false)
+                handleShareRoom()
+              }}
+              className="w-full text-left px-3 py-2 rounded bg-[#0d1117] hover:bg-[#21262d] text-xs text-[#c9d1d9] border border-[#30363d] flex items-center gap-2"
+            >
+              <span>🔗</span>
+              <span>Share Workspace & Invite</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false)
+                setShortcutsModalOpen(true)
+              }}
+              className="w-full text-left px-3 py-2 rounded bg-[#0d1117] hover:bg-[#21262d] text-xs text-[#c9d1d9] border border-[#30363d] flex items-center gap-2"
+            >
+              <span>⌨️</span>
+              <span>Keyboard Shortcuts Reference</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false)
+                setSettingsModalOpen(true)
+              }}
+              className="w-full text-left px-3 py-2 rounded bg-[#0d1117] hover:bg-[#21262d] text-xs text-[#c9d1d9] border border-[#30363d] flex items-center gap-2"
+            >
+              <span>⚙️</span>
+              <span>Editor Settings</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false)
+                handleLeaveRoom()
+              }}
+              className="w-full text-left px-3 py-2 rounded bg-[#f8514915] text-[#f85149] hover:bg-[#f8514925] text-xs border border-[#f8514940] flex items-center gap-2"
+            >
+              <span>🚪</span>
+              <span>Leave Room</span>
+            </button>
+          </div>
+        </>
+      )}
+
       {shareMessage && (
-        <div className="absolute top-14 right-4 z-40 px-3 py-1.5 rounded bg-[#1f6feb] text-white text-xs shadow-lg animate-fade">
+        <div className="fixed top-14 right-4 z-[9999] px-3 py-1.5 rounded bg-[#1f6feb] text-white text-xs shadow-lg animate-fade">
           ✓ {shareMessage}
         </div>
       )}
@@ -3734,6 +3847,12 @@ function App() {
 
         {/* 2. VS Code Primary Sidebar */}
         {sidebarOpen && (
+          <div
+            className="mobile-sidebar-backdrop md:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+        {sidebarOpen && (
           <aside className="vscode-sidebar" style={{ width: `${sidebarWidth}px` }}>
             <div
               className={`sidebar-resize-handle ${isResizingSidebar ? "resizing" : ""}`}
@@ -3798,6 +3917,16 @@ function App() {
                     >
                       <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7-7-7 7" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      title="Close Sidebar"
+                      onClick={() => setSidebarOpen(false)}
+                      className="sidebar-icon-btn md:hidden"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                       </svg>
                     </button>
                   </div>
@@ -3901,6 +4030,16 @@ function App() {
                     >
                       <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7-7-7 7" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      title="Close Sidebar"
+                      onClick={() => setSidebarOpen(false)}
+                      className="sidebar-icon-btn md:hidden"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                       </svg>
                     </button>
                   </div>
@@ -5597,6 +5736,110 @@ function App() {
           </div>
         </div>
       )}
+      {/* Mobile Bottom Navigation Bar (hidden on desktop via CSS) */}
+      <nav className="mobile-bottom-bar">
+        {/* Explorer */}
+        <button
+          type="button"
+          onClick={() => {
+            if (activeActivityTab === "explorer" && sidebarOpen) {
+              setSidebarOpen(false)
+            } else {
+              setActiveActivityTab("explorer")
+              setSidebarOpen(true)
+            }
+          }}
+          className={`mobile-bottom-tab ${sidebarOpen && activeActivityTab === "explorer" ? "active" : ""}`}
+          title="Explorer"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+          </svg>
+          <span>Files</span>
+        </button>
+
+        {/* Chat */}
+        <button
+          type="button"
+          onClick={() => {
+            if (activeActivityTab === "chat" && sidebarOpen) {
+              setSidebarOpen(false)
+            } else {
+              setActiveActivityTab("chat")
+              setSidebarOpen(true)
+            }
+          }}
+          className={`mobile-bottom-tab ${sidebarOpen && activeActivityTab === "chat" ? "active" : ""}`}
+          title="Chat"
+        >
+          {unreadChatCount > 0 && activeActivityTab !== "chat" && (
+            <span className="mobile-tab-badge">{unreadChatCount > 9 ? "9+" : unreadChatCount}</span>
+          )}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+          <span>Chat</span>
+        </button>
+
+        {/* Terminal */}
+        <button
+          type="button"
+          onClick={() => setTerminalOpen((c) => !c)}
+          className={`mobile-bottom-tab ${terminalOpen ? "active" : ""}`}
+          title="Terminal"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 17l6-6-6-6m8 14h8" />
+          </svg>
+          <span>Terminal</span>
+        </button>
+
+        {/* Git */}
+        <button
+          type="button"
+          onClick={() => {
+            if (activeActivityTab === "git" && sidebarOpen) {
+              setSidebarOpen(false)
+            } else {
+              setActiveActivityTab("git")
+              setSidebarOpen(true)
+            }
+          }}
+          className={`mobile-bottom-tab ${sidebarOpen && activeActivityTab === "git" ? "active" : ""}`}
+          title="Source Control"
+        >
+          {gitChanges.length > 0 && activeActivityTab !== "git" && (
+            <span className="mobile-tab-badge">{gitChanges.length > 9 ? "9+" : gitChanges.length}</span>
+          )}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="18" cy="18" r="3" />
+            <circle cx="6" cy="6" r="3" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 9v12m12-9a9 9 0 00-9-9" />
+          </svg>
+          <span>Git</span>
+        </button>
+
+        {/* Collaborators */}
+        <button
+          type="button"
+          onClick={() => {
+            if (activeActivityTab === "collaborators" && sidebarOpen) {
+              setSidebarOpen(false)
+            } else {
+              setActiveActivityTab("collaborators")
+              setSidebarOpen(true)
+            }
+          }}
+          className={`mobile-bottom-tab ${sidebarOpen && activeActivityTab === "collaborators" ? "active" : ""}`}
+          title="Collaborators"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+          </svg>
+          <span>Users</span>
+        </button>
+      </nav>
+
     </main>
   )
 }

@@ -1296,10 +1296,202 @@ select {
   cursor: not-allowed;
 }
 
+/* ==========================================================================
+   Mobile & Tablet Responsive Overhaul
+   ========================================================================== */
 @media (max-width: 768px) {
-  .vscode-activity-bar,
-  .vscode-sidebar {
+  .vscode-activity-bar {
     display: none;
+  }
+
+  .vscode-sidebar {
+    position: fixed;
+    top: 45px;
+    bottom: 48px;
+    left: 0;
+    z-index: 900;
+    width: 290px !important;
+    max-width: 85vw !important;
+    background: #0d1117;
+    border-right: 1px solid #30363d;
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.7);
+    animation: mobile-drawer-slide-in 0.18s ease-out;
+  }
+
+  .sidebar-resize-handle {
+    display: none;
+  }
+
+  /* Ensure editor area accounts for bottom nav height */
+  .vscode-editor-area {
+    padding-bottom: 0;
+  }
+
+  /* Better touch targets for toolbar buttons */
+  button {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Language select on mobile */
+  select {
+    font-size: 12px;
+    padding: 4px 6px;
+  }
+}
+
+@keyframes mobile-drawer-slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.mobile-sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  top: 45px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+  z-index: 899;
+  animation: mobile-backdrop-fade 0.15s ease-out;
+}
+
+@keyframes mobile-backdrop-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Mobile Bottom Navigation Bar */
+.mobile-bottom-bar {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-bottom-bar {
+    display: flex;
+    height: calc(48px + env(safe-area-inset-bottom, 0px));
+    min-height: 48px;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: #161b22;
+    border-top: 1px solid #30363d;
+    align-items: center;
+    justify-content: space-around;
+    padding-left: 4px;
+    padding-right: 4px;
+    z-index: 800;
+    user-select: none;
+    flex-shrink: 0;
+  }
+
+  .mobile-bottom-tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    flex: 1;
+    height: 100%;
+    color: #8b949e;
+    font-size: 9.5px;
+    font-weight: 500;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    position: relative;
+    transition: color 0.1s ease;
+  }
+
+  .mobile-bottom-tab.active {
+    color: #58a6ff;
+  }
+
+  .mobile-bottom-tab svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .mobile-tab-badge {
+    position: absolute;
+    top: 4px;
+    right: 22%;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    border-radius: 7px;
+    background: #1f6feb;
+    color: #ffffff;
+    font-size: 8.5px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
+}
+
+/* Mobile Header Menu Dropdown Drawer */
+.mobile-header-menu {
+  position: fixed;
+  top: 45px;
+  right: 0;
+  width: 280px;
+  max-width: 85vw;
+  background: #161b22;
+  border-left: 1px solid #30363d;
+  border-bottom: 1px solid #30363d;
+  border-bottom-left-radius: 8px;
+  box-shadow: -8px 8px 30px rgba(0, 0, 0, 0.8);
+  z-index: 1000;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: mobile-drawer-slide-in-right 0.18s ease-out;
+}
+
+@keyframes mobile-drawer-slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* Responsive Split Screen handling (< 900px) */
+@media (max-width: 900px) {
+  .preview-split-container {
+    flex-direction: column;
+  }
+
+  .preview-panel,
+  .markdown-preview-container {
+    width: 100% !important;
+    height: 50% !important;
+    border-left: none !important;
+    border-top: 1px solid #30363d !important;
+  }
+
+  .share-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .shortcuts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .editor-tab {
+    padding: 0 8px;
+    font-size: 11px;
   }
 }
 
