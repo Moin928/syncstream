@@ -10,6 +10,7 @@ import org.springframework.web.socket.server.HandshakeInterceptor;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -22,6 +23,8 @@ import java.util.regex.Pattern;
  *   <li>Values are URL-decoded using UTF-8 before validation.</li>
  *   <li>{@code clientId} must be a valid UUID (RFC 4122 format).</li>
  *   <li>{@code room} must be alphanumeric with optional hyphens, 1–64 chars.</li>
+ *   <li>{@code role} must be one of {viewer, editor, admin, owner} (defaults to editor).</li>
+ *   <li>{@code username} is validated and sanitized (if provided).</li>
  *   <li>Any parameter that fails validation closes the handshake immediately.</li>
  * </ul>
  */
@@ -42,6 +45,11 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
   private static final Pattern ROOM_PATTERN =
     Pattern.compile("^[a-zA-Z0-9\\-]{1,64}$");
 
+  /** Known valid roles for server-side enforcement. */
+  private static final Set<String> VALID_ROLES = Set.of(
+    "viewer", "editor", "admin", "owner"
+  );
+
   @Override
   public boolean beforeHandshake(
     ServerHttpRequest request,
@@ -59,6 +67,8 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
 
     String room     = null;
     String clientId = null;
+    String role     = "editor";
+    String username = null;
 
     // Parse and URL-decode each parameter
     for (String parameter : query.split("&")) {
@@ -71,10 +81,17 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
         String key   = URLDecoder.decode(parts[0], StandardCharsets.UTF_8);
         String value = URLDecoder.decode(parts[1], StandardCharsets.UTF_8);
 
-        if ("room".equals(key)) {
-          room = value;
-        } else if ("clientId".equals(key)) {
-          clientId = value;
+        switch (key) {
+          case "room" -> room = value;
+          case "clientId" -> clientId = value;
+          case "role" -> {
+            String lowerRole = value.toLowerCase().trim();
+            if (VALID_ROLES.contains(lowerRole)) {
+              role = lowerRole;
+            }
+          }
+          case "username" -> username = sanitizeUsername(value);
+          default -> {}
         }
       } catch (IllegalArgumentException e) {
         // Malformed URL encoding
@@ -84,7 +101,7 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
       }
     }
 
-    // Both params must be present
+    // Both room and clientId must be present
     if (room == null || room.isBlank()) {
       logger.warn("WebSocket handshake rejected: missing 'room' parameter from {}",
         request.getRemoteAddress());
@@ -114,6 +131,10 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
     // All checks passed — store in session attributes
     attributes.put("room",     room);
     attributes.put("clientId", clientId);
+    attributes.put("role",     role);
+    if (username != null) {
+      attributes.put("username", username);
+    }
 
     return true;
   }
@@ -125,6 +146,13 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
     WebSocketHandler wsHandler,
     Exception exception
   ) {
+  }
+
+  private static String sanitizeUsername(String raw) {
+    if (raw == null) return "User";
+    String clean = raw.replaceAll("[^a-zA-Z0-9 _\\-]", "").trim();
+    if (clean.isBlank()) return "User";
+    return clean.length() <= 32 ? clean : clean.substring(0, 32);
   }
 
   /** Truncates a value for safe logging (prevents log injection via long strings). */

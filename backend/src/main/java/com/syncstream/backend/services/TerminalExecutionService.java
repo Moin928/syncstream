@@ -4,6 +4,7 @@ import com.syncstream.backend.websocket.TerminalSessionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.util.FileSystemUtils;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -65,6 +66,7 @@ public class TerminalExecutionService {
     }
 
     WebSocketSession socket = session.getSocket();
+    String room = session.getRoom();
 
     // Security validation first — before touching any OS resources
     CommandSecurityFilter.ValidationResult security =
@@ -85,7 +87,8 @@ public class TerminalExecutionService {
     executor.submit(() -> {
       Process process = null;
       try {
-        process = startProcess(command, null);
+        Path localDir = getLocalSandboxDir(room, clientId);
+        process = startProcess(room, clientId, command, Files.exists(localDir) ? localDir.toFile() : null);
         runningProcesses.put(clientId, process);
         streamOutput(socket, process);
 
@@ -120,6 +123,7 @@ public class TerminalExecutionService {
     }
 
     WebSocketSession socket = session.getSocket();
+    String room = session.getRoom();
 
     // Enforce code size limit
     if (code != null && code.getBytes(StandardCharsets.UTF_8).length > MAX_CODE_BYTES) {
@@ -149,12 +153,12 @@ public class TerminalExecutionService {
           + " (" + fileName + ") ===\u001B[0m\r\n");
 
       // Write code file into the container or local temp dir
-      boolean writtenToDocker = writeFileToRunner(fileName, code);
+      boolean writtenToDocker = writeFileToRunner(room, clientId, fileName, code);
       if (!writtenToDocker) {
-        writeLocalFileFallback(clientId, fileName, code);
+        writeLocalFileFallback(room, clientId, fileName, code);
       }
 
-      runProcessWithTimeout(socket, clientId, runCmd);
+      runProcessWithTimeout(socket, room, clientId, runCmd);
     });
   }
 
@@ -181,6 +185,7 @@ public class TerminalExecutionService {
     }
 
     WebSocketSession socket = session.getSocket();
+    String room = session.getRoom();
 
     // Stop any running process first
     Process existingProcess = runningProcesses.get(clientId);
@@ -207,19 +212,20 @@ public class TerminalExecutionService {
       for (Map.Entry<String, String> entry : files.entrySet()) {
         String fname = entry.getKey();
         String fileCode = entry.getValue();
-        boolean written = writeFileToRunner(fname, fileCode);
+        boolean written = writeFileToRunner(room, clientId, fname, fileCode);
         if (!written) {
-          writeLocalFileFallback(clientId, fname, fileCode);
+          writeLocalFileFallback(room, clientId, fname, fileCode);
         }
       }
 
       String runCmd = getProjectRunCommand(language, entryFile);
-      runProcessWithTimeout(socket, clientId, runCmd);
+      runProcessWithTimeout(socket, room, clientId, runCmd);
     });
   }
 
   private void runProcessWithTimeout(
     WebSocketSession socket,
+    String room,
     String clientId,
     String runCmd
   ) {
@@ -227,11 +233,9 @@ public class TerminalExecutionService {
     boolean timedOut = false;
 
     try {
-      Path localDir = Paths.get(
-        System.getProperty("java.io.tmpdir"), "syncstream", "runner", clientId
-      );
+      Path localDir = getLocalSandboxDir(room, clientId);
 
-      process = startProcess(runCmd, Files.exists(localDir) ? localDir.toFile() : null);
+      process = startProcess(room, clientId, runCmd, Files.exists(localDir) ? localDir.toFile() : null);
       runningProcesses.put(clientId, process);
 
       final Process finalProcess = process;
@@ -328,21 +332,19 @@ public class TerminalExecutionService {
    * Starts a process using Docker exec when available, falling back to a
    * direct OS shell when Docker is not running.
    */
-  private Process startProcess(String command, File workingDirectory) throws IOException {
+  private Process startProcess(String room, String clientId, String command, File workingDirectory) throws IOException {
     // Process-level sandbox limits: max 50 processes/threads, 35s CPU limit, 10MB file limit
     String sandboxedCommand = "ulimit -u 50 -t 35 -f 10240 2>/dev/null; " + command;
+    String safeDir = getDockerSandboxPath(room, clientId);
 
-    // Try Docker first — '-i' keeps standard input open for interactive input
+    // Try Docker first — '-i' keeps standard input open for interactive input, -w sets session working dir
     String[] dockerCommand = {
-      "docker", "exec", "-i", RUNNER_CONTAINER, "bash", "-lc", sandboxedCommand
+      "docker", "exec", "-i", "-w", safeDir, RUNNER_CONTAINER, "bash", "-lc", sandboxedCommand
     };
 
     try {
       ProcessBuilder dockerPb = new ProcessBuilder(dockerCommand)
         .redirectErrorStream(true);
-      if (workingDirectory != null) {
-        dockerPb.directory(workingDirectory);
-      }
       return dockerPb.start();
     } catch (IOException dockerEx) {
       logger.debug("Docker unavailable ({}), falling back to local shell", dockerEx.getMessage());
@@ -369,8 +371,6 @@ public class TerminalExecutionService {
 
   /**
    * Reads the process stdout/stderr in chunks and forwards immediately to the WebSocket.
-   * Uses byte buffers instead of readLine() so interactive prompts without trailing newlines
-   * (e.g. input("Enter name: ")) stream to the terminal without delay.
    */
   private void streamOutput(WebSocketSession socket, Process process) throws IOException {
     try (InputStream is = process.getInputStream()) {
@@ -398,59 +398,31 @@ public class TerminalExecutionService {
   }
 
   // --------------------------------------------------------------------------
-  // File name sanitization
+  // File name sanitization & isolation
   // --------------------------------------------------------------------------
 
-  /**
-   * Sanitizes a file name supplied by the frontend so that it cannot escape
-   * the container's /workspace directory.
-   *
-   * <p>Rules:
-   * <ul>
-   *   <li>Null / blank input → falls back to "code.txt"</li>
-   *   <li>Max 200 characters</li>
-   *   <li>Null bytes (\0) stripped</li>
-   *   <li>Absolute paths (starting with /) rejected → sanitized to basename</li>
-   *   <li>Traversal sequences (../ and ..\) rejected → exception thrown</li>
-   *   <li>Only [a-zA-Z0-9._\-/] characters allowed; everything else stripped</li>
-   *   <li>Result must not be empty after sanitization</li>
-   * </ul>
-   *
-   * @param fileName the raw file name from the client
-   * @return a safe, relative file path
-   * @throws SecurityException if the name contains traversal sequences
-   */
   private String sanitizeFileName(String fileName) {
     if (fileName == null || fileName.isBlank()) {
       return "code.txt";
     }
 
-    // Strip null bytes
     String name = fileName.replace("\0", "");
-
-    // Enforce max length
     if (name.length() > 200) {
       name = name.substring(0, 200);
     }
 
-    // Block directory traversal — both Unix and Windows variants
-    if (name.contains("..") ) {
+    if (name.contains("..")) {
       logger.warn("Blocked path traversal attempt in filename: {}", sanitiseForLog(fileName));
       throw new SecurityException("Illegal file path: directory traversal is not permitted.");
     }
 
-    // Strip leading slashes so the file is always relative
     while (name.startsWith("/") || name.startsWith("\\")) {
       name = name.substring(1);
     }
 
-    // Whitelist: only safe file-path characters (no spaces, no shell metacharacters)
     name = name.replaceAll("[^a-zA-Z0-9._\\-/]", "_");
-
-    // Collapse multiple consecutive slashes
     name = name.replaceAll("/+", "/");
 
-    // Ensure we still have something usable
     if (name.isBlank() || name.equals("/") || name.equals(".")) {
       return "code.txt";
     }
@@ -458,11 +430,25 @@ public class TerminalExecutionService {
     return name;
   }
 
+  private String getDockerSandboxPath(String room, String clientId) {
+    String safeRoom = (room != null && !room.isBlank()) ? room.replaceAll("[^a-zA-Z0-9\\-]", "_") : "default";
+    String safeClient = (clientId != null && !clientId.isBlank()) ? clientId.replaceAll("[^a-zA-Z0-9\\-]", "_") : "anonymous";
+    return "/workspace/" + safeRoom + "/" + safeClient;
+  }
+
+  private Path getLocalSandboxDir(String room, String clientId) {
+    String safeRoom = (room != null && !room.isBlank()) ? room.replaceAll("[^a-zA-Z0-9\\-]", "_") : "default";
+    String safeClient = (clientId != null && !clientId.isBlank()) ? clientId.replaceAll("[^a-zA-Z0-9\\-]", "_") : "anonymous";
+    return Paths.get(System.getProperty("java.io.tmpdir"), "syncstream", "runner", safeRoom, safeClient)
+      .toAbsolutePath()
+      .normalize();
+  }
+
   // --------------------------------------------------------------------------
   // File writing helpers
   // --------------------------------------------------------------------------
 
-  private boolean writeFileToRunner(String rawFileName, String code) {
+  private boolean writeFileToRunner(String room, String clientId, String rawFileName, String code) {
     final String fileName;
     try {
       fileName = sanitizeFileName(rawFileName);
@@ -471,13 +457,13 @@ public class TerminalExecutionService {
       return false;
     }
 
+    String sandboxPath = getDockerSandboxPath(room, clientId);
+
     try {
-      // Pass the sanitized filename as a separate argument (not concatenated into the shell string)
-      // to eliminate any residual shell injection risk.
       String[] writeCommand = {
         "docker", "exec", "-i", RUNNER_CONTAINER,
         "sh", "-c",
-        "mkdir -p \"/workspace/$(dirname '" + fileName + "')\" 2>/dev/null; cat > \"/workspace/" + fileName + "\""
+        "mkdir -p \"" + sandboxPath + "/$(dirname '" + fileName + "')\" 2>/dev/null; cat > \"" + sandboxPath + "/" + fileName + "\""
       };
 
       Process writeProcess = new ProcessBuilder(writeCommand).start();
@@ -494,7 +480,7 @@ public class TerminalExecutionService {
     }
   }
 
-  private void writeLocalFileFallback(String clientId, String rawFileName, String code) {
+  private void writeLocalFileFallback(String room, String clientId, String rawFileName, String code) {
     final String fileName;
     try {
       fileName = sanitizeFileName(rawFileName);
@@ -504,18 +490,11 @@ public class TerminalExecutionService {
     }
 
     try {
-      Path sandboxDir = Paths.get(
-        System.getProperty("java.io.tmpdir"), "syncstream", "runner", clientId
-      ).toAbsolutePath().normalize();
-
+      Path sandboxDir = getLocalSandboxDir(room, clientId);
       Path filePath = sandboxDir.resolve(fileName).normalize();
 
-      // Verify the resolved path is still inside the sandbox directory
       if (!filePath.startsWith(sandboxDir)) {
-        logger.warn(
-          "Blocked file write outside sandbox. clientId={} resolvedPath={}",
-          clientId, filePath
-        );
+        logger.warn("Blocked file write outside sandbox. clientId={} resolvedPath={}", clientId, filePath);
         return;
       }
 
@@ -526,7 +505,33 @@ public class TerminalExecutionService {
     }
   }
 
-  /** Truncates a string for safe log output (reused from main filter). */
+  /**
+   * Cleans up local and in-container sandbox directories when a session disconnects.
+   */
+  public void cleanupSession(String room, String clientId) {
+    // 1. Clean local temp dir
+    try {
+      Path localDir = getLocalSandboxDir(room, clientId);
+      if (Files.exists(localDir)) {
+        FileSystemUtils.deleteRecursively(localDir);
+        logger.debug("Cleaned local sandbox directory: {}", localDir);
+      }
+    } catch (Exception e) {
+      logger.warn("Error cleaning local sandbox directory: {}", e.getMessage());
+    }
+
+    // 2. Clean docker directory
+    try {
+      String sandboxPath = getDockerSandboxPath(room, clientId);
+      String[] cleanupCommand = {
+        "docker", "exec", RUNNER_CONTAINER, "rm", "-rf", sandboxPath
+      };
+      new ProcessBuilder(cleanupCommand).start();
+    } catch (Exception ignored) {
+    }
+  }
+
+  /** Truncates a string for safe log output. */
   private static String sanitiseForLog(String s) {
     if (s == null) return "<null>";
     return s.length() <= 120 ? s : s.substring(0, 120) + "...[truncated]";
@@ -561,61 +566,21 @@ public class TerminalExecutionService {
 
   private String getRunCommandForLanguage(String language, String fileName) {
     return switch (language.toLowerCase()) {
-      // Python: -u for unbuffered output so lines stream immediately
-      case "python" ->
-        "python3 -u " + fileName + " || python -u " + fileName;
-
-      case "javascript" ->
-        "node " + fileName;
-
-      case "typescript" ->
-        "npx --yes tsx " + fileName + " 2>&1 || npx --yes ts-node " + fileName + " 2>&1 || node " + fileName;
-
-      // Java: UTF-8 encoding, classpath set to current directory
-      case "java" ->
-        "javac -encoding UTF-8 Main.java 2>&1 && java -cp . Main";
-
-      // C++: warnings enabled, C++17
-      case "cpp" ->
-        "g++ -O2 -std=c++17 -Wall -Wextra -o main_bin main.cpp 2>&1 && ./main_bin";
-
-      // C: warnings enabled
-      case "c" ->
-        "gcc -O2 -Wall -Wextra -o main_bin main.c 2>&1 && ./main_bin";
-
-      // Go: initialise a temporary module so 'go run' works without a module file
-      case "go" ->
-        "(go mod init runner 2>/dev/null || true) && go run main.go 2>&1";
-
-      // Rust: use a unique binary name to avoid collision with source file
-      case "rust" ->
-        "rustc main.rs -o main_bin 2>&1 && ./main_bin";
-
-      // C#: prefer dotnet-script, fall back to mcs/mono
-      case "csharp" ->
-        "dotnet-script Program.cs 2>&1 || (mcs -out:Program.exe Program.cs 2>&1 && mono Program.exe) || dotnet run 2>&1";
-
-      // Ruby
-      case "ruby" ->
-        "ruby main.rb 2>&1";
-
-      // PHP
-      case "php" ->
-        "php index.php 2>&1";
-
-      // Kotlin: compile then run
-      case "kotlin" ->
-        "kotlinc main.kt -include-runtime -d main.jar 2>&1 && java -jar main.jar";
-
-      // Swift
-      case "swift" ->
-        "swift main.swift 2>&1";
-
-      case "sql" ->
-        "cat query.sql";
-
-      default ->
-        "cat " + fileName;
+      case "python" -> "python3 -u " + fileName + " || python -u " + fileName;
+      case "javascript" -> "node " + fileName;
+      case "typescript" -> "npx --yes tsx " + fileName + " 2>&1 || npx --yes ts-node " + fileName + " 2>&1 || node " + fileName;
+      case "java" -> "javac -encoding UTF-8 Main.java 2>&1 && java -cp . Main";
+      case "cpp" -> "g++ -O2 -std=c++17 -Wall -Wextra -o main_bin main.cpp 2>&1 && ./main_bin";
+      case "c" -> "gcc -O2 -Wall -Wextra -o main_bin main.c 2>&1 && ./main_bin";
+      case "go" -> "(go mod init runner 2>/dev/null || true) && go run main.go 2>&1";
+      case "rust" -> "rustc main.rs -o main_bin 2>&1 && ./main_bin";
+      case "csharp" -> "dotnet-script Program.cs 2>&1 || (mcs -out:Program.exe Program.cs 2>&1 && mono Program.exe) || dotnet run 2>&1";
+      case "ruby" -> "ruby main.rb 2>&1";
+      case "php" -> "php index.php 2>&1";
+      case "kotlin" -> "kotlinc main.kt -include-runtime -d main.jar 2>&1 && java -jar main.jar";
+      case "swift" -> "swift main.swift 2>&1";
+      case "sql" -> "cat query.sql";
+      default -> "cat " + fileName;
     };
   }
 
@@ -655,7 +620,6 @@ public class TerminalExecutionService {
     try {
       send(socket, output);
     } catch (IOException ignored) {
-      // Socket already closed.
     }
   }
 }

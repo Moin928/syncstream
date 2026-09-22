@@ -1157,7 +1157,8 @@ function App() {
       // Document synchronization completed
       () => {
         setDocumentReady(true)
-      }
+      },
+      new URLSearchParams(window.location.search).get("role") || "editor"
     )
 
     providerRef.current = provider
@@ -1274,13 +1275,13 @@ function App() {
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
     const clientId = providerRef.current?.clientId || ""
-
+    const urlRole = new URLSearchParams(window.location.search).get("role") || myRole || "editor"
     const socket = new WebSocket(
       `${protocol}//${window.location.hostname}:8080/ws/terminal?room=${encodeURIComponent(
         room
       )}&username=${encodeURIComponent(
         username
-      )}&clientId=${encodeURIComponent(clientId)}`
+      )}&clientId=${encodeURIComponent(clientId)}&role=${encodeURIComponent(urlRole)}`
     )
 
     socket.binaryType = "arraybuffer"

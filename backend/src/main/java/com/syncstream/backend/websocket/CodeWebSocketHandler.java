@@ -13,15 +13,14 @@ import org.springframework.web.socket.handler.BinaryWebSocketHandler;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
-public class CodeWebSocketHandler
-  extends BinaryWebSocketHandler {
+public class CodeWebSocketHandler extends BinaryWebSocketHandler {
 
   private static final Logger logger =
-    LoggerFactory.getLogger(
-      CodeWebSocketHandler.class
-    );
+    LoggerFactory.getLogger(CodeWebSocketHandler.class);
 
   private static final int MESSAGE_UPDATE = 0;
   private static final int MESSAGE_SYNC_REQUEST = 1;
@@ -31,11 +30,22 @@ public class CodeWebSocketHandler
   private static final int MESSAGE_SNAPSHOT_REQUEST = 5;
   private static final int MESSAGE_SNAPSHOT_RESPONSE = 6;
 
+  /** Max allowed binary message size (2 MB). */
+  private static final int MAX_BINARY_SIZE = 2 * 1024 * 1024;
+
+  /** Rate limit: max 120 binary updates per 1-second window per clientId. */
+  private static final int RATE_LIMIT_MAX = 120;
+  private static final int RATE_LIMIT_WINDOW = 1000; // ms
+
+  private final Map<String, AtomicInteger> rateLimitCounters =
+    new ConcurrentHashMap<>();
+  private final Map<String, Long> rateLimitWindowStart =
+    new ConcurrentHashMap<>();
+
   private final WebSocketRoomManager roomManager;
   private final RoomPersistenceService persistenceService;
 
-  private final ObjectMapper objectMapper =
-    new ObjectMapper();
+  private final ObjectMapper objectMapper = new ObjectMapper();
 
   public CodeWebSocketHandler(
     WebSocketRoomManager roomManager,
@@ -46,734 +56,330 @@ public class CodeWebSocketHandler
   }
 
   @Override
-  public void afterConnectionEstablished(
-    WebSocketSession session
-  ) {
-    String room =
-      (String) session
-        .getAttributes()
-        .get("room");
+  public void afterConnectionEstablished(WebSocketSession session) {
+    String room = (String) session.getAttributes().get("room");
+    String clientId = (String) session.getAttributes().get("clientId");
+    String role = (String) session.getAttributes().getOrDefault("role", "editor");
 
-    roomManager.addToRoom(
-      room,
-      session
-    );
+    roomManager.addToRoom(room, session);
 
     logger.info(
-      "WebSocket connected: {} joined room: {}",
-      session.getId(),
-      room
+      "WebSocket connected: session={} clientId={} role={} joined room={}",
+      session.getId(), clientId, role, room
     );
   }
 
   @Override
-  protected void handleBinaryMessage(
-    WebSocketSession session,
-    BinaryMessage message
-  ) {
-    String room =
-      (String) session
-        .getAttributes()
-        .get("room");
+  protected void handleBinaryMessage(WebSocketSession session, BinaryMessage message) {
+    String room = (String) session.getAttributes().get("room");
+    String clientId = (String) session.getAttributes().get("clientId");
+    String role = (String) session.getAttributes().getOrDefault("role", "editor");
 
-    byte[] data =
-      new byte[
-        message.getPayload().remaining()
-        ];
+    int payloadLength = message.getPayload().remaining();
+    if (payloadLength == 0) {
+      logger.warn("Received empty binary message from clientId={}", clientId);
+      return;
+    }
 
+    if (payloadLength > MAX_BINARY_SIZE) {
+      logger.warn("Rejected oversized binary message ({} bytes) from clientId={}", payloadLength, clientId);
+      return;
+    }
+
+    // Rate limiting
+    if (clientId != null && !checkRateLimit(clientId)) {
+      logger.warn("Rate limit exceeded for binary messages from clientId={}", clientId);
+      return;
+    }
+
+    byte[] data = new byte[payloadLength];
     message.getPayload().get(data);
 
-    if (data.length == 0) {
-      logger.warn(
-        "Received empty binary message"
-      );
+    int messageType = data[0];
 
-      return;
+    // Server-side role authorization check: viewers cannot write updates or snapshots
+    if ("viewer".equals(role)) {
+      if (messageType == MESSAGE_UPDATE || messageType == MESSAGE_SNAPSHOT_RESPONSE) {
+        logger.warn(
+          "Permission denied: viewer clientId={} attempted write operation (type={}) in room={}",
+          clientId, messageType, room
+        );
+        return;
+      }
     }
 
-    int messageType =
-      data[0];
-
-    if (
-      messageType ==
-        MESSAGE_UPDATE
-    ) {
-      handleUpdate(
-        room,
-        session,
-        data
-      );
-
-      return;
+    switch (messageType) {
+      case MESSAGE_UPDATE -> handleUpdate(room, session, data);
+      case MESSAGE_SYNC_REQUEST -> handleSyncRequest(room, session, data);
+      case MESSAGE_SYNC_RESPONSE -> sendSyncResponse(room, data);
+      case MESSAGE_PRESENCE -> handlePresence(room, session, data);
+      case MESSAGE_SNAPSHOT_REQUEST -> handleSnapshotRequest(room, session);
+      case MESSAGE_SNAPSHOT_RESPONSE -> handleSnapshotResponse(room, data);
+      default -> logger.warn("Unknown WebSocket message type: {} from clientId={}", messageType, clientId);
     }
-
-    if (
-      messageType ==
-        MESSAGE_SYNC_REQUEST
-    ) {
-      handleSyncRequest(
-        room,
-        session,
-        data
-      );
-
-      return;
-    }
-
-    if (
-      messageType ==
-        MESSAGE_SYNC_RESPONSE
-    ) {
-      sendSyncResponse(
-        room,
-        data
-      );
-
-      return;
-    }
-
-    if (
-      messageType ==
-        MESSAGE_PRESENCE
-    ) {
-      handlePresence(
-        room,
-        session,
-        data
-      );
-
-      return;
-    }
-
-    if (
-      messageType ==
-        MESSAGE_SNAPSHOT_REQUEST
-    ) {
-      handleSnapshotRequest(
-        room,
-        session
-      );
-
-      return;
-    }
-
-    if (
-      messageType ==
-        MESSAGE_SNAPSHOT_RESPONSE
-    ) {
-      handleSnapshotResponse(
-        room,
-        data
-      );
-
-      return;
-    }
-
-    logger.warn(
-      "Unknown WebSocket message type: {}",
-      messageType
-    );
   }
 
-  private void handleUpdate(
-    String room,
-    WebSocketSession sender,
-    byte[] data
-  ) {
-    // stores the update before sending it to the other clients
-    roomManager.addRoomUpdate(
-      room,
-      data
-    );
+  private boolean checkRateLimit(String clientId) {
+    long now = System.currentTimeMillis();
+    Long windowStart = rateLimitWindowStart.get(clientId);
 
-    broadcastUpdate(
-      room,
-      sender,
-      data
-    );
+    if (windowStart == null || (now - windowStart) > RATE_LIMIT_WINDOW) {
+      rateLimitWindowStart.put(clientId, now);
+      rateLimitCounters.put(clientId, new AtomicInteger(1));
+      return true;
+    }
 
-    // asks a client for a snapshot once enough updates have built up
-    if (
-      roomManager.shouldCompact(room)
-    ) {
-      WebSocketSession snapshotSession =
-        getSnapshotSession(room);
+    AtomicInteger counter = rateLimitCounters.computeIfAbsent(clientId, k -> new AtomicInteger(0));
+    return counter.incrementAndGet() <= RATE_LIMIT_MAX;
+  }
 
+  private void handleUpdate(String room, WebSocketSession sender, byte[] data) {
+    // Stores the update before sending it to the other clients
+    roomManager.addRoomUpdate(room, data);
+    broadcastUpdate(room, sender, data);
+
+    // Asks a client for a snapshot once enough updates have built up
+    if (roomManager.shouldCompact(room)) {
+      WebSocketSession snapshotSession = getSnapshotSession(room);
       if (snapshotSession != null) {
-        handleSnapshotRequest(
-          room,
-          snapshotSession
-        );
+        handleSnapshotRequest(room, snapshotSession);
       }
     }
   }
 
-  private void handleSyncRequest(
-    String room,
-    WebSocketSession requester,
-    byte[] data
-  ) {
+  private void handleSyncRequest(String room, WebSocketSession requester, byte[] data) {
     if (data.length < 37) {
-      logger.warn(
-        "Invalid sync request received"
-      );
-
+      logger.warn("Invalid sync request received");
       return;
     }
 
-    String targetClientId =
-      new String(
-        data,
-        1,
-        36,
-        StandardCharsets.UTF_8
-      );
+    String targetClientId = new String(data, 1, 36, StandardCharsets.UTF_8);
 
     /*
-     * only the client that requested the sync should
+     * Only the client that requested the sync should
      * receive the stored room state.
      */
-    String requesterClientId =
-      (String) requester
-        .getAttributes()
-        .get("clientId");
+    String requesterClientId = (String) requester.getAttributes().get("clientId");
 
-    if (
-      !targetClientId.equals(
-        requesterClientId
-      )
-    ) {
-      logger.warn(
-        "Sync request clientId mismatch"
-      );
-
+    if (!targetClientId.equals(requesterClientId)) {
+      logger.warn("Sync request clientId mismatch");
       return;
     }
 
-    List<byte[]> updates =
-      roomManager.getRoomUpdates(
-        room
-      );
+    List<byte[]> updates = roomManager.getRoomUpdates(room);
 
     /*
-     * replays the stored room state so the client can
+     * Replays the stored room state so the client can
      * rebuild the current document.
      */
     for (byte[] update : updates) {
       try {
-        requester.sendMessage(
-          new BinaryMessage(update)
-        );
+        requester.sendMessage(new BinaryMessage(update));
       } catch (Exception e) {
-        logger.error(
-          "Failed to send stored update to {}",
-          requester.getId(),
-          e
-        );
-
+        logger.error("Failed to send stored update to {}", requester.getId(), e);
         return;
       }
     }
 
-    byte[] complete =
-      new byte[1 + 36];
-
-    complete[0] =
-      MESSAGE_SYNC_COMPLETE;
-
-    byte[] clientIdBytes =
-      targetClientId.getBytes(
-        StandardCharsets.UTF_8
-      );
-
-    System.arraycopy(
-      clientIdBytes,
-      0,
-      complete,
-      1,
-      36
-    );
+    byte[] complete = new byte[1 + 36];
+    complete[0] = MESSAGE_SYNC_COMPLETE;
+    byte[] clientIdBytes = targetClientId.getBytes(StandardCharsets.UTF_8);
+    System.arraycopy(clientIdBytes, 0, complete, 1, 36);
 
     try {
-      requester.sendMessage(
-        new BinaryMessage(complete)
-      );
+      requester.sendMessage(new BinaryMessage(complete));
     } catch (Exception e) {
-      logger.error(
-        "Failed to send sync completion",
-        e
-      );
+      logger.error("Failed to send sync completion", e);
     }
   }
 
-  private void broadcastUpdate(
-    String room,
-    WebSocketSession sender,
-    byte[] data
-  ) {
-    for (
-      WebSocketSession client :
-      roomManager.getRoomSessions(room)
-    ) {
-      if (
-        client.isOpen() &&
-          !client.getId().equals(
-            sender.getId()
-          )
-      ) {
+  private void broadcastUpdate(String room, WebSocketSession sender, byte[] data) {
+    for (WebSocketSession client : roomManager.getRoomSessions(room)) {
+      if (client.isOpen() && !client.getId().equals(sender.getId())) {
         try {
-          client.sendMessage(
-            new BinaryMessage(data)
-          );
+          client.sendMessage(new BinaryMessage(data));
         } catch (Exception e) {
-          logger.error(
-            "Failed to send update to client {}",
-            client.getId(),
-            e
-          );
+          logger.error("Failed to send update to client {}", client.getId(), e);
         }
       }
     }
   }
 
-  private void sendSyncResponse(
-    String room,
-    byte[] data
-  ) {
+  private void sendSyncResponse(String room, byte[] data) {
     if (data.length < 37) {
-      logger.warn(
-        "Invalid sync response received"
-      );
-
+      logger.warn("Invalid sync response received");
       return;
     }
 
-    String targetClientId =
-      new String(
-        data,
-        1,
-        36,
-        StandardCharsets.UTF_8
-      );
+    String targetClientId = new String(data, 1, 36, StandardCharsets.UTF_8);
+    WebSocketSession target = roomManager.getSessionByClientId(room, targetClientId);
 
-    WebSocketSession target =
-      roomManager.getSessionByClientId(
-        room,
-        targetClientId
-      );
-
-    if (
-      target == null ||
-        !target.isOpen()
-    ) {
-      logger.warn(
-        "Sync target not found: {}",
-        targetClientId
-      );
-
+    if (target == null || !target.isOpen()) {
+      logger.warn("Sync target not found: {}", targetClientId);
       return;
     }
 
     try {
-      target.sendMessage(
-        new BinaryMessage(data)
-      );
+      target.sendMessage(new BinaryMessage(data));
     } catch (Exception e) {
-      logger.error(
-        "Failed to send sync response",
-        e
-      );
+      logger.error("Failed to send sync response", e);
     }
   }
 
   @Override
-  public void afterConnectionClosed(
-    WebSocketSession session,
-    CloseStatus status
-  ) {
-    String room =
-      (String) session
-        .getAttributes()
-        .get("room");
+  public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+    String room = (String) session.getAttributes().get("room");
+    String clientId = (String) session.getAttributes().get("clientId");
 
-    String clientId =
-      (String) session
-        .getAttributes()
-        .get("clientId");
+    if (clientId != null) {
+      rateLimitCounters.remove(clientId);
+      rateLimitWindowStart.remove(clientId);
+    }
 
     boolean wasCurrentSession =
-      clientId != null &&
-        roomManager.isCurrentSession(
-          room,
-          clientId,
-          session.getId()
-        );
+      clientId != null && roomManager.isCurrentSession(room, clientId, session.getId());
 
-    roomManager.removeFromRoom(
-      room,
-      session.getId()
-    );
+    roomManager.removeFromRoom(room, session.getId());
 
-    if (
-      clientId != null &&
-        wasCurrentSession
-    ) {
-      roomManager.removeUser(
-        room,
-        clientId
-      );
+    if (clientId != null && wasCurrentSession) {
+      roomManager.removeUser(room, clientId);
 
       try {
-        Map<String, String> presence =
-          Map.of(
-            "action",
-            "leave",
-            "clientId",
-            clientId
-          );
-
-        byte[] message =
-          createPresenceMessage(
-            presence
-          );
-
-        broadcastPresence(
-          room,
-          message
+        Map<String, String> presence = Map.of(
+          "action", "leave",
+          "clientId", clientId
         );
+
+        byte[] message = createPresenceMessage(presence);
+        broadcastPresence(room, message);
 
       } catch (Exception e) {
-        logger.error(
-          "Failed to broadcast user leave",
-          e
-        );
+        logger.error("Failed to broadcast user leave", e);
       }
     }
 
-    logger.info(
-      "WebSocket disconnected: {} left room {}",
-      session.getId(),
-      room
-    );
+    logger.info("WebSocket disconnected: {} left room {}", session.getId(), room);
   }
 
-  private void handlePresence(
-    String room,
-    WebSocketSession session,
-    byte[] data
-  ) {
+  private void handlePresence(String room, WebSocketSession session, byte[] data) {
     try {
-      String json =
-        new String(
-          data,
-          1,
-          data.length - 1,
-          StandardCharsets.UTF_8
-        );
+      String json = new String(data, 1, data.length - 1, StandardCharsets.UTF_8);
 
-      Map<String, Object> presence =
-        objectMapper.readValue(
-          json,
-          Map.class
-        );
+      @SuppressWarnings("unchecked")
+      Map<String, Object> presence = objectMapper.readValue(json, Map.class);
 
-      String action =
-        (String) presence.get(
-          "action"
-        );
+      String action = (String) presence.get("action");
+      String clientId = (String) presence.get("clientId");
+      String sessionClientId = (String) session.getAttributes().get("clientId");
 
-      String clientId =
-        (String) presence.get(
-          "clientId"
-        );
-
-      String sessionClientId =
-        (String) session
-          .getAttributes()
-          .get("clientId");
-
-      if (
-        clientId == null ||
-          !clientId.equals(
-            sessionClientId
-          )
-      ) {
-        logger.warn(
-          "Invalid presence clientId"
-        );
-
+      if (clientId == null || !clientId.equals(sessionClientId)) {
+        logger.warn("Invalid presence clientId");
         return;
       }
 
-      if (
-        "join".equals(action)
-      ) {
-        String username =
-          (String) presence.get(
-            "username"
-          );
-
-        if (
-          username == null ||
-            username.isBlank()
-        ) {
-          logger.warn(
-            "Invalid username"
-          );
-
+      if ("join".equals(action)) {
+        String username = (String) presence.get("username");
+        if (username == null || username.isBlank()) {
+          logger.warn("Invalid username");
           return;
         }
 
-        roomManager.addUser(
-          room,
-          clientId,
-          username
-        );
-
-        broadcastPresence(
-          room,
-          data
-        );
-
-        sendCurrentUsers(
-          room,
-          session
-        );
+        roomManager.addUser(room, clientId, username);
+        broadcastPresence(room, data);
+        sendCurrentUsers(room, session);
       }
 
-      if (
-        "cursor".equals(action) ||
-          "selection".equals(action)
-      ) {
-        broadcastPresence(
-          room,
-          data
-        );
+      if ("cursor".equals(action) || "selection".equals(action)) {
+        broadcastPresence(room, data);
       }
 
     } catch (Exception e) {
-      logger.error(
-        "Failed to handle presence message",
-        e
-      );
+      logger.error("Failed to handle presence message", e);
     }
   }
 
-  private void sendCurrentUsers(
-    String room,
-    WebSocketSession session
-  ) {
+  private void sendCurrentUsers(String room, WebSocketSession session) {
     try {
-      Map<String, Object> presence =
-        Map.of(
-          "action",
-          "state",
-          "users",
-          roomManager.getRoomUsers(
-            room
-          )
-        );
-
-      byte[] message =
-        createPresenceMessage(
-          presence
-        );
-
-      session.sendMessage(
-        new BinaryMessage(message)
+      Map<String, Object> presence = Map.of(
+        "action", "state",
+        "users", roomManager.getRoomUsers(room)
       );
+
+      byte[] message = createPresenceMessage(presence);
+      session.sendMessage(new BinaryMessage(message));
 
     } catch (Exception e) {
-      logger.error(
-        "Failed to send current users",
-        e
-      );
+      logger.error("Failed to send current users", e);
     }
   }
 
-  private void broadcastPresence(
-    String room,
-    byte[] data
-  ) {
-    for (
-      WebSocketSession client :
-      roomManager.getRoomSessions(room)
-    ) {
+  private void broadcastPresence(String room, byte[] data) {
+    for (WebSocketSession client : roomManager.getRoomSessions(room)) {
       if (client.isOpen()) {
         try {
-          client.sendMessage(
-            new BinaryMessage(data)
-          );
+          client.sendMessage(new BinaryMessage(data));
         } catch (Exception e) {
-          logger.error(
-            "Failed to send presence update",
-            e
-          );
+          logger.error("Failed to send presence update", e);
         }
       }
     }
   }
 
-  private byte[] createPresenceMessage(
-    Map<String, ?> presence
-  ) throws Exception {
-    // converts the presence data into the binary message format
-    byte[] jsonBytes =
-      objectMapper
-        .writeValueAsString(
-          presence
-        )
-        .getBytes(
-          StandardCharsets.UTF_8
-        );
-
-    byte[] message =
-      new byte[
-        1 + jsonBytes.length
-        ];
-
-    message[0] =
-      MESSAGE_PRESENCE;
-
-    System.arraycopy(
-      jsonBytes,
-      0,
-      message,
-      1,
-      jsonBytes.length
-    );
-
+  private byte[] createPresenceMessage(Map<String, ?> presence) throws Exception {
+    byte[] jsonBytes = objectMapper.writeValueAsString(presence).getBytes(StandardCharsets.UTF_8);
+    byte[] message = new byte[1 + jsonBytes.length];
+    message[0] = MESSAGE_PRESENCE;
+    System.arraycopy(jsonBytes, 0, message, 1, jsonBytes.length);
     return message;
   }
 
-  private void handleSnapshotRequest(
-    String room,
-    WebSocketSession requester
-  ) {
-    long snapshotUpdateId =
-      persistenceService.getLatestUpdateId(
-        room
-      );
+  private void handleSnapshotRequest(String room, WebSocketSession requester) {
+    long snapshotUpdateId = persistenceService.getLatestUpdateId(room);
+    byte[] message = new byte[1 + Long.BYTES];
+    message[0] = MESSAGE_SNAPSHOT_REQUEST;
 
-    byte[] message =
-      new byte[
-        1 + Long.BYTES
-        ];
-
-    message[0] =
-      MESSAGE_SNAPSHOT_REQUEST;
-
-    java.nio.ByteBuffer
-      .wrap(
-        message,
-        1,
-        Long.BYTES
-      )
-      .putLong(
-        snapshotUpdateId
-      );
+    java.nio.ByteBuffer.wrap(message, 1, Long.BYTES).putLong(snapshotUpdateId);
 
     try {
-      requester.sendMessage(
-        new BinaryMessage(message)
-      );
-
-      logger.info(
-        "Snapshot request sent for room: {} with barrier: {}",
-        room,
-        snapshotUpdateId
-      );
-
+      requester.sendMessage(new BinaryMessage(message));
+      logger.info("Snapshot request sent for room: {} with barrier: {}", room, snapshotUpdateId);
     } catch (Exception e) {
-      logger.error(
-        "Failed to send snapshot request",
-        e
-      );
+      logger.error("Failed to send snapshot request", e);
     }
   }
 
-  private void handleSnapshotResponse(
-    String room,
-    byte[] data
-  ) {
-    if (
-      data.length <
-        1 + Long.BYTES
-    ) {
-      logger.warn(
-        "Invalid snapshot response received"
-      );
-
+  private void handleSnapshotResponse(String room, byte[] data) {
+    if (data.length < 1 + Long.BYTES) {
+      logger.warn("Invalid snapshot response received");
       return;
     }
 
-    long snapshotUpdateId =
-      java.nio.ByteBuffer
-        .wrap(
-          data,
-          1,
-          Long.BYTES
-        )
-        .getLong();
+    long snapshotUpdateId = java.nio.ByteBuffer.wrap(data, 1, Long.BYTES).getLong();
+    int snapshotStart = 1 + Long.BYTES;
 
-    int snapshotStart =
-      1 + Long.BYTES;
-
-    byte[] snapshotData =
-      new byte[
-        data.length - snapshotStart
-        ];
-
-    System.arraycopy(
-      data,
-      snapshotStart,
-      snapshotData,
-      0,
-      snapshotData.length
-    );
+    byte[] snapshotData = new byte[data.length - snapshotStart];
+    System.arraycopy(data, snapshotStart, snapshotData, 0, snapshotData.length);
 
     if (snapshotData.length == 0) {
-      logger.warn(
-        "Received empty snapshot for room: {}",
-        room
-      );
-
+      logger.warn("Received empty snapshot for room: {}", room);
       return;
     }
 
-    // saves the snapshot first so the persisted state is updated
-    persistenceService.saveSnapshot(
-      room,
-      snapshotData,
-      snapshotUpdateId
-    );
+    persistenceService.saveSnapshot(room, snapshotData, snapshotUpdateId);
+    roomManager.applySnapshot(room, snapshotData, snapshotUpdateId);
 
-    roomManager.applySnapshot(
-      room,
-      snapshotData,
-      snapshotUpdateId
-    );
-
-    logger.info(
-      "Snapshot saved for room: {} at update ID: {}",
-      room,
-      snapshotUpdateId
-    );
+    logger.info("Snapshot saved for room: {} at update ID: {}", room, snapshotUpdateId);
   }
 
-  private WebSocketSession getSnapshotSession(
-    String room
-  ) {
-    // uses the first active client in the room to create the snapshot
-    for (
-      WebSocketSession session :
-      roomManager.getRoomSessions(room)
-    ) {
+  private WebSocketSession getSnapshotSession(String room) {
+    for (WebSocketSession session : roomManager.getRoomSessions(room)) {
       if (session.isOpen()) {
-        return session;
+        String role = (String) session.getAttributes().getOrDefault("role", "editor");
+        if (!"viewer".equals(role)) {
+          return session;
+        }
       }
     }
-
     return null;
   }
 }

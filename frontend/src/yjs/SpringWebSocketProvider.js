@@ -18,13 +18,15 @@ export class SpringWebSocketProvider {
     onUserLeave,
     onSelectionChange,
     onConnectionStateChange,
-    onSyncComplete
+    onSyncComplete,
+    role = "editor"
   ) {
     this.clientId = crypto.randomUUID()
 
     this.room = room
     this.ydoc = ydoc
     this.username = username
+    this.role = role
 
     this.onUsersChange = onUsersChange
     this.onCursorChange = onCursorChange
@@ -116,12 +118,20 @@ export class SpringWebSocketProvider {
       "CONNECTING"
     )
 
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
+    const host = window.location.hostname || "localhost"
+    const port = "8080"
+
     const socket =
       new WebSocket(
-        `ws://localhost:8080/ws?room=${encodeURIComponent(
+        `${protocol}//${host}:${port}/ws?room=${encodeURIComponent(
           this.room
         )}&clientId=${encodeURIComponent(
           this.clientId
+        )}&role=${encodeURIComponent(
+          this.role || "editor"
+        )}&username=${encodeURIComponent(
+          this.username || "User"
         )}`
       )
 

@@ -151,6 +151,8 @@ public class WebSocketRoomManager {
 
       if (sessions.isEmpty()) {
         rooms.remove(room);
+        roomStates.remove(room);
+        roomUsers.remove(room);
       }
     }
   }

@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Handles the collaborative terminal WebSocket channel at {@code /ws/terminal}.
  *
  * <p>The handler validates every incoming message, enforces a per-client
- * rate-limit, and dispatches to built-in commands or the execution service.
+ * rate-limit, authorizes roles (blocking viewers), and dispatches to built-in commands or the execution service.
  */
 @Component
 public class TerminalWebSocketHandler
@@ -60,6 +60,10 @@ public class TerminalWebSocketHandler
     "html", "css", "json", "sql"
   );
 
+  private static final Set<String> READ_ONLY_BUILTINS = Set.of(
+    "help", "clear", "whoami", "room", "users", "env", "date"
+  );
+
   // --------------------------------------------------------------------------
   // Dependencies
   // --------------------------------------------------------------------------
@@ -88,16 +92,28 @@ public class TerminalWebSocketHandler
 
   @Override
   public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-    String room     = getQueryParameter(session, "room");
-    String username = getQueryParameter(session, "username");
-    String clientId = getQueryParameter(session, "clientId");
+    String room     = (String) session.getAttributes().get("room");
+    String username = (String) session.getAttributes().get("username");
+    String clientId = (String) session.getAttributes().get("clientId");
+    String role     = (String) session.getAttributes().getOrDefault("role", "editor");
 
-    if (
-      room == null || room.isBlank() ||
-      username == null || username.isBlank() ||
-      clientId == null || clientId.isBlank()
-    ) {
-      send(session, "\r\nInvalid terminal session.\r\n");
+    // Fallback if interceptor was bypassed
+    if (room == null || room.isBlank()) {
+      room = getQueryParameter(session, "room");
+    }
+    if (username == null || username.isBlank()) {
+      username = getQueryParameter(session, "username");
+    }
+    if (clientId == null || clientId.isBlank()) {
+      clientId = getQueryParameter(session, "clientId");
+    }
+
+    if (username == null || username.isBlank()) {
+      username = "User";
+    }
+
+    if (room == null || room.isBlank() || clientId == null || clientId.isBlank()) {
+      send(session, "\r\nInvalid terminal session parameters.\r\n");
       session.close(CloseStatus.BAD_DATA);
       return;
     }
@@ -105,32 +121,40 @@ public class TerminalWebSocketHandler
     session.getAttributes().put("room",     room);
     session.getAttributes().put("username", username);
     session.getAttributes().put("clientId", clientId);
+    session.getAttributes().put("role",     role);
 
     sessionManager.createSession(clientId, room, username, session);
 
     logger.info(
-      "Terminal connected: session={} clientId={} user={} room={}",
-      session.getId(), clientId, username, room
+      "Terminal connected: session={} clientId={} user={} role={} room={}",
+      session.getId(), clientId, username, role, room
     );
 
     send(
       session,
       "\u001B[32mSyncStream Collaborative Terminal\u001B[0m\r\n"
-        + "Connected as \u001B[33m" + username + "\u001B[0m"
+        + "Connected as \u001B[33m" + sanitizeForTerminal(username) + " (" + role + ")\u001B[0m"
         + " in room \u001B[34m" + room + "\u001B[0m\r\n"
         + "Type \u001B[36m'help'\u001B[0m for available commands,"
-        + " or click \u001B[32m'▶ Run'\u001B[0m above to execute.\r\n\r\n$ "
+        + ("viewer".equals(role) ? " (Read-only mode)" : " or click \u001B[32m'▶ Run'\u001B[0m above to execute.")
+        + "\r\n\r\n$ "
     );
   }
 
   @Override
   public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+    String room     = (String) session.getAttributes().get("room");
     String clientId = (String) session.getAttributes().get("clientId");
+
     if (clientId != null) {
       sessionManager.removeSession(clientId);
       rateLimitCounters.remove(clientId);
       rateLimitWindowStart.remove(clientId);
+
+      // Clean up sandbox temp files for this session
+      executionService.cleanupSession(room, clientId);
     }
+
     logger.info(
       "Terminal disconnected: session={} clientId={} status={}",
       session.getId(), clientId, status
@@ -156,6 +180,7 @@ public class TerminalWebSocketHandler
     String rawPayload = message.getPayload().trim();
     String clientId   = (String) session.getAttributes().get("clientId");
     String username   = (String) session.getAttributes().get("username");
+    String role       = (String) session.getAttributes().getOrDefault("role", "editor");
 
     if (clientId == null || !sessionManager.hasSession(clientId)) {
       send(session, "\r\nTerminal session unavailable.\r\n");
@@ -169,8 +194,24 @@ public class TerminalWebSocketHandler
 
     // Ctrl+C — interrupt running process
     if (rawPayload.equals("\u0003")) {
-      executionService.interrupt(clientId);
+      if (!"viewer".equals(role)) {
+        executionService.interrupt(clientId);
+      }
       return;
+    }
+
+    // Role enforcement: viewers cannot run code payloads
+    if ("viewer".equals(role)) {
+      if (rawPayload.startsWith("{") && rawPayload.endsWith("}")) {
+        send(session, "\r\n\u001B[31m[Permission Denied] Viewers cannot execute code.\u001B[0m\r\n$ ");
+        return;
+      }
+
+      String cmdLower = rawPayload.toLowerCase().trim();
+      if (!READ_ONLY_BUILTINS.contains(cmdLower)) {
+        send(session, "\r\n\u001B[31m[Permission Denied] Viewers cannot execute shell commands.\u001B[0m\r\n$ ");
+        return;
+      }
     }
 
     // JSON run-code payload from the Run button
@@ -295,10 +336,6 @@ public class TerminalWebSocketHandler
   // Built-in commands (no process spawned)
   // --------------------------------------------------------------------------
 
-  /**
-   * Returns {@code true} if the command was handled here, {@code false} if
-   * it should be passed on to the execution service.
-   */
   private boolean handleBuiltinCommand(
     WebSocketSession session,
     String command,
@@ -318,7 +355,6 @@ public class TerminalWebSocketHandler
             + "  \u001B[33menv\u001B[0m         Show safe environment information\r\n"
             + "  \u001B[33mdate\u001B[0m        Show current server date/time\r\n"
             + "  \u001B[33mversion\u001B[0m     Show available runtime versions\r\n"
-            + "  \u001B[33mls\u001B[0m          List workspace files (runs in container)\r\n"
             + "\r\nShortcuts:\r\n"
             + "  \u001B[33mCtrl+C\u001B[0m      Interrupt running process\r\n"
             + "  \u001B[33mCtrl+`\u001B[0m      Toggle terminal panel\r\n"
@@ -335,7 +371,8 @@ public class TerminalWebSocketHandler
 
       case "whoami" -> {
         String username = (String) session.getAttributes().get("username");
-        send(session, "\r\n" + (username != null ? username : "unknown") + "\r\n$ ");
+        String role     = (String) session.getAttributes().getOrDefault("role", "editor");
+        send(session, "\r\n" + (username != null ? username : "unknown") + " (" + role + ")\r\n$ ");
         yield true;
       }
 
@@ -353,21 +390,27 @@ public class TerminalWebSocketHandler
       }
 
       case "kill" -> {
-        executionService.interrupt(clientId);
-        send(session, "\r\n\u001B[33mProcess interrupted.\u001B[0m\r\n$ ");
+        String role = (String) session.getAttributes().getOrDefault("role", "editor");
+        if ("viewer".equals(role)) {
+          send(session, "\r\n\u001B[31m[Permission Denied] Viewers cannot kill processes.\u001B[0m\r\n$ ");
+        } else {
+          executionService.interrupt(clientId);
+          send(session, "\r\n\u001B[33mProcess interrupted.\u001B[0m\r\n$ ");
+        }
         yield true;
       }
 
       case "env" -> {
         String username = (String) session.getAttributes().get("username");
         String room     = (String) session.getAttributes().get("room");
+        String role     = (String) session.getAttributes().getOrDefault("role", "editor");
         send(session,
           "\r\n\u001B[36mEnvironment:\u001B[0m\r\n"
             + "  USER=" + (username != null ? username : "unknown") + "\r\n"
+            + "  ROLE=" + role + "\r\n"
             + "  ROOM=" + (room != null ? room : "unknown") + "\r\n"
             + "  PLATFORM=SyncStream Collaborative IDE\r\n"
-            + "  TIMEOUT=" + TerminalExecutionService.class.getSimpleName()
-                             + " (30s execution limit)\r\n\r\n"
+            + "  TIMEOUT=30s execution limit\r\n\r\n"
         );
         send(session, "$ ");
         yield true;
@@ -381,15 +424,19 @@ public class TerminalWebSocketHandler
       }
 
       case "version" -> {
-        // Delegate to the runner — safe whitelisted command
-        executionService.execute(clientId,
-          "echo -n 'Node: ' && node --version 2>/dev/null || echo 'Node: not found';"
-            + "echo -n 'Python: ' && python3 --version 2>/dev/null || echo 'Python: not found';"
-            + "echo -n 'Java: ' && java -version 2>&1 | head -1 || echo 'Java: not found';"
-            + "echo -n 'g++: ' && g++ --version 2>/dev/null | head -1 || echo 'g++: not found';"
-            + "echo -n 'Go: ' && go version 2>/dev/null || echo 'Go: not found';"
-            + "echo -n 'Rust: ' && rustc --version 2>/dev/null || echo 'Rust: not found';"
-        );
+        String role = (String) session.getAttributes().getOrDefault("role", "editor");
+        if ("viewer".equals(role)) {
+          send(session, "\r\nNode.js 22, Python 3.12, Java 21, GCC 13, Go 1.22, Rust 1.75\r\n$ ");
+        } else {
+          executionService.execute(clientId,
+            "echo -n 'Node: ' && node --version 2>/dev/null || echo 'Node: not found';"
+              + "echo -n 'Python: ' && python3 --version 2>/dev/null || echo 'Python: not found';"
+              + "echo -n 'Java: ' && java -version 2>&1 | head -1 || echo 'Java: not found';"
+              + "echo -n 'g++: ' && g++ --version 2>/dev/null | head -1 || echo 'g++: not found';"
+              + "echo -n 'Go: ' && go version 2>/dev/null || echo 'Go: not found';"
+              + "echo -n 'Rust: ' && rustc --version 2>/dev/null || echo 'Rust: not found';"
+          );
+        }
         yield true;
       }
 
@@ -401,17 +448,11 @@ public class TerminalWebSocketHandler
   // Rate limiting
   // --------------------------------------------------------------------------
 
-  /**
-   * Simple token-bucket rate limiter.
-   *
-   * @return {@code true} if the request is within the allowed rate
-   */
   private boolean checkRateLimit(String clientId) {
     long now = System.currentTimeMillis();
 
     Long windowStart = rateLimitWindowStart.get(clientId);
     if (windowStart == null || (now - windowStart) > RATE_LIMIT_WINDOW) {
-      // Start a new window
       rateLimitWindowStart.put(clientId, now);
       rateLimitCounters.put(clientId, new AtomicInteger(1));
       return true;
@@ -438,7 +479,6 @@ public class TerminalWebSocketHandler
 
     StringBuilder sb = new StringBuilder("\r\n\u001B[32mConnected users:\u001B[0m\r\n");
     for (String name : users.values()) {
-      // Sanitize username before echoing it to the terminal (prevent ANSI injection)
       sb.append("  • ").append(sanitizeForTerminal(name)).append("\r\n");
     }
 
@@ -467,28 +507,16 @@ public class TerminalWebSocketHandler
     }
   }
 
-  /**
-   * Strips ANSI escape sequences, newlines, and carriage returns from a value
-   * before writing it to log files (prevents log injection / forged log lines).
-   */
   private static String sanitizeForLog(String value) {
     if (value == null) return "<null>";
-    // Strip ANSI escape codes
     String clean = value.replaceAll("\u001B\\[[;\\d]*[mGKHF]", "");
-    // Strip control characters and newlines used for log injection
     clean = clean.replaceAll("[\\r\\n\\t\u0000-\u001F\u007F]", "_");
     return clean.length() <= 80 ? clean : clean.substring(0, 80) + "...[truncated]";
   }
 
-  /**
-   * Strips control characters and ANSI sequences from a username before
-   * outputting it to the terminal (prevents terminal escape injection).
-   */
   private static String sanitizeForTerminal(String value) {
     if (value == null) return "<unknown>";
-    // Remove ANSI escape sequences
     String clean = value.replaceAll("\u001B\\[[;\\d]*[mGKHF]", "");
-    // Remove other control characters except printable ASCII
     clean = clean.replaceAll("[\\x00-\\x1F\\x7F]", "");
     return clean.length() <= 50 ? clean : clean.substring(0, 50) + "...";
   }

@@ -51,6 +51,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
 
     registry
       .addHandler(terminalWebSocketHandler, "/ws/terminal")
+      .addInterceptors(new RoomHandshakeInterceptor())
       .setAllowedOrigins(origins);
   }
 

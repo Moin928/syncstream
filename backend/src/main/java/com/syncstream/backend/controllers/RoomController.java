@@ -2,38 +2,48 @@ package com.syncstream.backend.controllers;
 
 import com.syncstream.backend.models.Room;
 import com.syncstream.backend.repositories.RoomRepository;
+import com.syncstream.backend.services.RateLimitingService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/api/rooms")
-@CrossOrigin(origins = "http://localhost:5173")
 public class RoomController {
 
+  private static final Pattern ROOM_ID_PATTERN = Pattern.compile("^[a-zA-Z0-9\\-]{1,64}$");
+
   private final RoomRepository roomRepository;
+  private final RateLimitingService rateLimitingService;
 
   public RoomController(
-    RoomRepository roomRepository
+    RoomRepository roomRepository,
+    RateLimitingService rateLimitingService
   ) {
     this.roomRepository = roomRepository;
+    this.rateLimitingService = rateLimitingService;
   }
 
   @PostMapping
-  public ResponseEntity<String> createRoom() {
+  public ResponseEntity<String> createRoom(HttpServletRequest request) {
+    String clientIp = getClientIp(request);
 
-    // generates a unique id for the new room
-    String roomId =
-      UUID.randomUUID().toString();
+    // Rate limit: max 15 room creations per minute per IP
+    if (!rateLimitingService.allowRequest(clientIp, "create_room", 15, 60_000)) {
+      return ResponseEntity
+        .status(HttpStatus.TOO_MANY_REQUESTS)
+        .body("Rate limit exceeded. Please wait a moment before creating another room.");
+    }
 
-    Room room =
-      new Room(roomId);
-
+    // Generates a cryptographically secure UUID for the new room
+    String roomId = UUID.randomUUID().toString();
+    Room room = new Room(roomId);
     roomRepository.save(room);
 
-    // returns the room id after it has been created
     return ResponseEntity
       .status(HttpStatus.CREATED)
       .body(roomId);
@@ -41,10 +51,26 @@ public class RoomController {
 
   @GetMapping("/{roomId}")
   public ResponseEntity<Void> checkRoom(
-    @PathVariable String roomId
+    @PathVariable String roomId,
+    HttpServletRequest request
   ) {
+    String clientIp = getClientIp(request);
 
-    // checks whether the requested room exists in the database
+    // Rate limit: max 120 room checks per minute per IP
+    if (!rateLimitingService.allowRequest(clientIp, "check_room", 120, 60_000)) {
+      return ResponseEntity
+        .status(HttpStatus.TOO_MANY_REQUESTS)
+        .build();
+    }
+
+    // Validate roomId format before querying database
+    if (roomId == null || !ROOM_ID_PATTERN.matcher(roomId).matches()) {
+      return ResponseEntity
+        .badRequest()
+        .build();
+    }
+
+    // Checks whether the requested room exists in the database
     if (!roomRepository.existsById(roomId)) {
       return ResponseEntity
         .notFound()
@@ -52,5 +78,13 @@ public class RoomController {
     }
 
     return ResponseEntity.ok().build();
+  }
+
+  private String getClientIp(HttpServletRequest request) {
+    String xForwardedFor = request.getHeader("X-Forwarded-For");
+    if (xForwardedFor != null && !xForwardedFor.isBlank()) {
+      return xForwardedFor.split(",")[0].trim();
+    }
+    return request.getRemoteAddr();
   }
 }
