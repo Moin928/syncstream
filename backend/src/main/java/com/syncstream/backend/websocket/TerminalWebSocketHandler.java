@@ -147,6 +147,12 @@ public class TerminalWebSocketHandler
     TextMessage message
   ) throws Exception {
 
+    // Reject payloads larger than 64 KB to prevent memory exhaustion
+    if (message.getPayloadLength() > 64 * 1024) {
+      send(session, "\r\n\u001B[31m[Error] Message too large (max 64 KB).\u001B[0m\r\n$ ");
+      return;
+    }
+
     String rawPayload = message.getPayload().trim();
     String clientId   = (String) session.getAttributes().get("clientId");
     String username   = (String) session.getAttributes().get("username");
@@ -184,7 +190,9 @@ public class TerminalWebSocketHandler
 
     // Built-in terminal commands
     String command = rawPayload;
-    logger.info("Terminal command from {} ({}): {}", username, clientId, command);
+    // Sanitize username for logging to prevent log injection
+    logger.info("Terminal command from {} ({}): {}", sanitizeForLog(username), clientId,
+      command.length() <= 200 ? command : command.substring(0, 200) + "...[truncated]");
 
     if (handleBuiltinCommand(session, command, clientId)) {
       return;
@@ -430,7 +438,8 @@ public class TerminalWebSocketHandler
 
     StringBuilder sb = new StringBuilder("\r\n\u001B[32mConnected users:\u001B[0m\r\n");
     for (String name : users.values()) {
-      sb.append("  • ").append(name).append("\r\n");
+      // Sanitize username before echoing it to the terminal (prevent ANSI injection)
+      sb.append("  • ").append(sanitizeForTerminal(name)).append("\r\n");
     }
 
     send(session, sb.toString());
@@ -456,5 +465,31 @@ public class TerminalWebSocketHandler
     if (session.isOpen()) {
       session.sendMessage(new TextMessage(output));
     }
+  }
+
+  /**
+   * Strips ANSI escape sequences, newlines, and carriage returns from a value
+   * before writing it to log files (prevents log injection / forged log lines).
+   */
+  private static String sanitizeForLog(String value) {
+    if (value == null) return "<null>";
+    // Strip ANSI escape codes
+    String clean = value.replaceAll("\u001B\\[[;\\d]*[mGKHF]", "");
+    // Strip control characters and newlines used for log injection
+    clean = clean.replaceAll("[\\r\\n\\t\u0000-\u001F\u007F]", "_");
+    return clean.length() <= 80 ? clean : clean.substring(0, 80) + "...[truncated]";
+  }
+
+  /**
+   * Strips control characters and ANSI sequences from a username before
+   * outputting it to the terminal (prevents terminal escape injection).
+   */
+  private static String sanitizeForTerminal(String value) {
+    if (value == null) return "<unknown>";
+    // Remove ANSI escape sequences
+    String clean = value.replaceAll("\u001B\\[[;\\d]*[mGKHF]", "");
+    // Remove other control characters except printable ASCII
+    clean = clean.replaceAll("[\\x00-\\x1F\\x7F]", "");
+    return clean.length() <= 50 ? clean : clean.substring(0, 50) + "...";
   }
 }

@@ -4858,7 +4858,7 @@ function App() {
                           key={previewKey}
                           title="SyncStream Live Web Preview"
                           srcDoc={previewSrcDoc}
-                          sandbox="allow-scripts allow-modals"
+                          sandbox="allow-scripts"
                           className="preview-iframe"
                         />
                       </div>

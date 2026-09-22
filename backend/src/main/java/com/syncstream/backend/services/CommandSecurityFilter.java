@@ -51,12 +51,13 @@ public class CommandSecurityFilter {
    * contains any of these strings.
    */
   private static final List<String> BLOCKED_SUBSTRINGS = List.of(
-    // Fork bomb (bash / zsh / sh variants)
+
+    // ── Fork bombs ────────────────────────────────────────────────────────
     ":(){ :|:",
     ":(){ :|:& };:",
     ":(){:|:& };:",
 
-    // Recursive filesystem destruction
+    // ── Recursive filesystem destruction ──────────────────────────────────
     "rm -rf /",
     "rm -rf /*",
     "rm -rf ~",
@@ -64,7 +65,7 @@ public class CommandSecurityFilter {
     "rm --no-preserve-root",
     "rimraf /",
 
-    // Overwrite system block devices
+    // ── Block-device overwrite ────────────────────────────────────────────
     "dd if=/dev/zero of=/dev/sd",
     "dd if=/dev/random of=/dev/sd",
     "dd if=/dev/urandom of=/dev/sd",
@@ -75,12 +76,12 @@ public class CommandSecurityFilter {
     "> /dev/nvme",
     ">/dev/nvme",
 
-    // Format block devices
+    // ── Format block devices ──────────────────────────────────────────────
     "mkfs",
     "mke2fs",
     "mkswap /dev/",
 
-    // System control
+    // ── System control / shutdown ─────────────────────────────────────────
     "shutdown",
     "reboot",
     "halt",
@@ -91,13 +92,13 @@ public class CommandSecurityFilter {
     "systemctl reboot",
     "systemctl halt",
 
-    // Process 1 kill (crash host)
+    // ── Process kill ──────────────────────────────────────────────────────
     "kill -9 1",
     "kill -9 -1",
     "kill -kill 1",
     "killall -9",
 
-    // Privilege escalation
+    // ── Privilege escalation ──────────────────────────────────────────────
     "sudo su",
     "sudo bash",
     "sudo -s",
@@ -108,8 +109,9 @@ public class CommandSecurityFilter {
     "chmod 777 /root",
     "chmod -r 000",
     "chown -r root",
+    "chmod +s",        // SUID bit — setuid escalation
 
-    // Credential and config poisoning
+    // ── Credential / config poisoning ─────────────────────────────────────
     "> /etc/passwd",
     "> /etc/shadow",
     "> /etc/sudoers",
@@ -117,18 +119,26 @@ public class CommandSecurityFilter {
     ">> /etc/shadow",
     "visudo",
     "passwd root",
+    "tee /etc/",       // tee write to /etc/*
+    "tee /proc/",      // tee write to /proc/*
 
-    // Firewall teardown
+    // ── Dynamic linker hijacking ──────────────────────────────────────────
+    "ld_preload",
+    "ld_library_path=/",
+    "ld_audit",
+
+    // ── Firewall teardown ──────────────────────────────────────────────────
     "iptables -f",
     "iptables --flush",
     "ufw disable",
     "ufw reset",
 
-    // Cron / scheduled task destruction
+    // ── Cron / scheduled task destruction ────────────────────────────────
     "crontab -r",
     "rm -rf /var/spool/cron",
+    "/etc/cron",       // writing to any cron directory
 
-    // Reverse shells and network exfil (common payloads)
+    // ── Reverse shells & network exfil ───────────────────────────────────
     "bash -i >& /dev/tcp",
     "bash -i>&/dev/tcp",
     "nc -e /bin/bash",
@@ -138,26 +148,82 @@ public class CommandSecurityFilter {
     "python3 -c 'import socket",
     "/dev/tcp/",
     "/dev/udp/",
+    "socat tcp",             // socat TCP reverse shells
+    "socat udp",
+    "socat exec",
 
-    // Kernel module / hardware manipulation
+    // ── Exfiltration via env vars ─────────────────────────────────────────
+    "env | nc",
+    "env | curl",
+    "env | wget",
+    "printenv | nc",
+    "printenv | curl",
+    "printenv | wget",
+    "cat /proc/*/environ",
+
+    // ── Read sensitive files ──────────────────────────────────────────────
+    "cat /etc/passwd",
+    "cat /etc/shadow",
+    "cat /etc/sudoers",
+    "cat /root/",
+    "cat /proc/keys",
+
+    // ── Exfiltration HTTP servers inside the container ───────────────────
+    "python -m http.server",
+    "python3 -m http.server",
+    "python -m simplehttpserver",
+    "python3 -m simplehttpserver",
+
+    // ── Package installs from remote URLs ─────────────────────────────────
+    "pip install -r http",
+    "pip3 install -r http",
+    "npm install http",
+    "gem install --remote",
+
+    // ── Git — fetch arbitrary (potentially malicious) remote code ─────────
+    "git clone",
+    "git fetch",
+    "git pull",
+    "git submodule",
+
+    // ── Kernel module / hardware manipulation ────────────────────────────
     "insmod",
     "rmmod",
     "modprobe",
 
-    // Mount / unmount
+    // ── Mount / unmount ───────────────────────────────────────────────────
     "mount /dev/",
     "umount /",
     "umount -a",
 
-    // Crypto-miner patterns (common)
+    // ── Crypto-miner patterns ─────────────────────────────────────────────
     "xmrig",
     "minerd",
     "cryptonight",
     "stratum+tcp",
+    "stratum+ssl",
 
-    // Overwrite workspace entirely
+    // ── Workspace destruction ──────────────────────────────────────────────
     "rm -rf /workspace",
-    "rm -rf /home"
+    "rm -rf /home",
+
+    // ── Observation / side-channel tools ──────────────────────────────────
+    "strace ",
+    "ltrace ",
+    "perf stat",
+
+    // ── PowerShell attack payloads (Windows fallback path) ───────────────
+    "invoke-webrequest",
+    "invoke-expression",
+    "iex(",
+    "iex ",
+    "downloadstring(",
+    "downloadfile(",
+    "net.webclient",
+    "-encodedcommand",
+    "-enc ",
+    "convertfrom-base64",
+    "system.reflection.assembly"
   );
 
   // --------------------------------------------------------------------------
@@ -169,6 +235,7 @@ public class CommandSecurityFilter {
    * Use case-insensitive flags where needed.
    */
   private static final List<Pattern> BLOCKED_PATTERNS = List.of(
+
     // Fork bombs — function definitions that recurse into themselves
     Pattern.compile(":\\(\\)\\s*\\{.*\\|.*\\}", Pattern.DOTALL),
 
@@ -178,11 +245,21 @@ public class CommandSecurityFilter {
     // Python/Perl/Ruby one-liner reverse shells
     Pattern.compile("(?i)(python|perl|ruby)\\d*\\s+-[ce]\\s+['\"].*socket.*"),
 
+    // Perl -e / Ruby -e with exec-like patterns
+    Pattern.compile("(?i)(perl|ruby)\\d*\\s+-e\\s+['\"].*exec.*"),
+
     // wget/curl piped to bash (download & execute)
-    Pattern.compile("(?i)(wget|curl)\\s+.+\\s*\\|\\s*(bash|sh|zsh|fish|python|perl|ruby)"),
+    Pattern.compile("(?i)(wget|curl)\\s+.+\\s*\\|\\s*(bash|sh|zsh|fish|python|perl|ruby|node|php)"),
+
+    // wget/curl -O then execute
+    Pattern.compile("(?i)(wget|curl)\\s+.+\\s+-[Oo]\\s+.+&&\\s*(bash|sh|chmod|python)"),
 
     // Base64 decode piped to shell (obfuscated execution)
-    Pattern.compile("(?i)base64\\s*(-d|--decode)?\\s*[|>]\\s*(bash|sh|zsh|python|perl|ruby|exec)"),
+    Pattern.compile("(?i)base64\\s*(-d|--decode)?\\s*[|>]\\s*(bash|sh|zsh|python|perl|ruby|exec|node)"),
+
+    // Hex/octal decode piped to shell
+    Pattern.compile("(?i)(echo|printf)\\s+['\"]?\\\\x[0-9a-fA-F]{2}.*['\"]?\\s*\\|\\s*(bash|sh)"),
+    Pattern.compile("(?i)(xxd|od|hexdump).*\\|.*\\b(bash|sh|python|perl)\\b"),
 
     // Kernel panic trigger via sysrq
     Pattern.compile("(?i)echo\\s+[bBcC]\\s*>\\s*/proc/sysrq-trigger"),
@@ -202,11 +279,53 @@ public class CommandSecurityFilter {
     // Docker socket access from inside container
     Pattern.compile("(?i)/var/run/docker\\.sock"),
 
-    // Excessive redirection attempts (> 3 redirects in one line — unusual)
-    Pattern.compile("([|>]{3,})"),
-
     // Glob-based rm of root-level directories
-    Pattern.compile("(?i)rm\\s+(-[a-zA-Z]*f[a-zA-Z]*\\s+|--force\\s+)?/[a-z*]+")
+    Pattern.compile("(?i)rm\\s+(-[a-zA-Z]*f[a-zA-Z]*\\s+|--force\\s+)?/[a-z*]+"),
+
+    // chmod +s (SUID) on any file
+    Pattern.compile("(?i)chmod\\s+[0-7]*[24][0-7]{0,3}\\s"),
+    Pattern.compile("(?i)chmod\\s+[ug]\\+s"),
+
+    // tee to sensitive paths
+    Pattern.compile("(?i)\\btee\\b.*/(etc|proc|sys|dev|root|boot)/"),
+
+    // env variable exfiltration: env/printenv | network tool
+    Pattern.compile("(?i)(env|printenv|set)\\s*\\|\\s*(nc|curl|wget|socat|python|perl)"),
+
+    // cat sensitive system files
+    Pattern.compile("(?i)\\bcat\\b\\s+/etc/(passwd|shadow|sudoers|crontab|hostname|hosts)"),
+
+    // LD_PRELOAD / dynamic linker hijack
+    Pattern.compile("(?i)LD_(PRELOAD|LIBRARY_PATH|AUDIT)\\s*="),
+
+    // git clone/fetch from non-local (network) URLs
+    Pattern.compile("(?i)git\\s+(clone|fetch|pull|submodule)\\s+(https?://|git://|ssh://|git@)"),
+
+    // npm/pip/gem install from remote in a pipe or exec
+    Pattern.compile("(?i)(npm|pip|pip3|gem|cargo)\\s+install\\s+.*(&&|\\|)"),
+
+    // Python http.server / SimpleHTTPServer
+    Pattern.compile("(?i)python\\d*\\s+-m\\s+(http\\.server|simplehttpserver)"),
+
+    // PowerShell encoded/download commands
+    Pattern.compile("(?i)powershell.*-e(nc|ncodedcommand)?\\s+[A-Za-z0-9+/=]{20,}"),
+    Pattern.compile("(?i)(Invoke-Expression|IEX)\\s*\\("),
+    Pattern.compile("(?i)Net\\.WebClient.*Download(String|File)\\("),
+
+    // Strace/ltrace on any command
+    Pattern.compile("(?i)\\b(strace|ltrace)\\s+"),
+
+    // socat reverse shell patterns
+    Pattern.compile("(?i)socat\\s+.*(exec|tcp|udp).*(/bin/|/usr/bin/)"),
+
+    // Attempts to write /etc via tee, redirection or cp
+    Pattern.compile("(?i)(>|tee|cp|mv)\\s+/etc/[a-z]"),
+
+    // cron write via tee or echo
+    Pattern.compile("(?i)(echo|printf|tee).*/(cron|cron\\.d|cron\\.daily|cron\\.hourly|crontab)"),
+
+    // Excessive redirection attempts (> 3 in one line — unusual)
+    Pattern.compile("([|>]{4,})")
   );
 
   // --------------------------------------------------------------------------
@@ -242,7 +361,7 @@ public class CommandSecurityFilter {
         );
 
         return ValidationResult.block(
-          "Command blocked by security policy: contains prohibited pattern '" + blocked + "'."
+          "Command blocked by security policy: contains prohibited pattern."
         );
       }
     }

@@ -398,14 +398,86 @@ public class TerminalExecutionService {
   }
 
   // --------------------------------------------------------------------------
+  // File name sanitization
+  // --------------------------------------------------------------------------
+
+  /**
+   * Sanitizes a file name supplied by the frontend so that it cannot escape
+   * the container's /workspace directory.
+   *
+   * <p>Rules:
+   * <ul>
+   *   <li>Null / blank input → falls back to "code.txt"</li>
+   *   <li>Max 200 characters</li>
+   *   <li>Null bytes (\0) stripped</li>
+   *   <li>Absolute paths (starting with /) rejected → sanitized to basename</li>
+   *   <li>Traversal sequences (../ and ..\) rejected → exception thrown</li>
+   *   <li>Only [a-zA-Z0-9._\-/] characters allowed; everything else stripped</li>
+   *   <li>Result must not be empty after sanitization</li>
+   * </ul>
+   *
+   * @param fileName the raw file name from the client
+   * @return a safe, relative file path
+   * @throws SecurityException if the name contains traversal sequences
+   */
+  private String sanitizeFileName(String fileName) {
+    if (fileName == null || fileName.isBlank()) {
+      return "code.txt";
+    }
+
+    // Strip null bytes
+    String name = fileName.replace("\0", "");
+
+    // Enforce max length
+    if (name.length() > 200) {
+      name = name.substring(0, 200);
+    }
+
+    // Block directory traversal — both Unix and Windows variants
+    if (name.contains("..") ) {
+      logger.warn("Blocked path traversal attempt in filename: {}", sanitiseForLog(fileName));
+      throw new SecurityException("Illegal file path: directory traversal is not permitted.");
+    }
+
+    // Strip leading slashes so the file is always relative
+    while (name.startsWith("/") || name.startsWith("\\")) {
+      name = name.substring(1);
+    }
+
+    // Whitelist: only safe file-path characters (no spaces, no shell metacharacters)
+    name = name.replaceAll("[^a-zA-Z0-9._\\-/]", "_");
+
+    // Collapse multiple consecutive slashes
+    name = name.replaceAll("/+", "/");
+
+    // Ensure we still have something usable
+    if (name.isBlank() || name.equals("/") || name.equals(".")) {
+      return "code.txt";
+    }
+
+    return name;
+  }
+
+  // --------------------------------------------------------------------------
   // File writing helpers
   // --------------------------------------------------------------------------
 
-  private boolean writeFileToRunner(String fileName, String code) {
+  private boolean writeFileToRunner(String rawFileName, String code) {
+    final String fileName;
     try {
+      fileName = sanitizeFileName(rawFileName);
+    } catch (SecurityException e) {
+      logger.warn("Rejected file write — unsafe filename: {}", sanitiseForLog(rawFileName));
+      return false;
+    }
+
+    try {
+      // Pass the sanitized filename as a separate argument (not concatenated into the shell string)
+      // to eliminate any residual shell injection risk.
       String[] writeCommand = {
         "docker", "exec", "-i", RUNNER_CONTAINER,
-        "sh", "-c", "mkdir -p \"$(dirname \"/workspace/" + fileName + "\")\" && cat > \"/workspace/" + fileName + "\""
+        "sh", "-c",
+        "mkdir -p \"/workspace/$(dirname '" + fileName + "')\" 2>/dev/null; cat > \"/workspace/" + fileName + "\""
       };
 
       Process writeProcess = new ProcessBuilder(writeCommand).start();
@@ -422,19 +494,42 @@ public class TerminalExecutionService {
     }
   }
 
-  private void writeLocalFileFallback(String clientId, String fileName, String code) {
+  private void writeLocalFileFallback(String clientId, String rawFileName, String code) {
+    final String fileName;
     try {
-      Path dir = Paths.get(
+      fileName = sanitizeFileName(rawFileName);
+    } catch (SecurityException e) {
+      logger.warn("Rejected local file write — unsafe filename: {}", sanitiseForLog(rawFileName));
+      return;
+    }
+
+    try {
+      Path sandboxDir = Paths.get(
         System.getProperty("java.io.tmpdir"), "syncstream", "runner", clientId
-      );
-      Path filePath = dir.resolve(fileName);
-      if (filePath.getParent() != null) {
-        Files.createDirectories(filePath.getParent());
+      ).toAbsolutePath().normalize();
+
+      Path filePath = sandboxDir.resolve(fileName).normalize();
+
+      // Verify the resolved path is still inside the sandbox directory
+      if (!filePath.startsWith(sandboxDir)) {
+        logger.warn(
+          "Blocked file write outside sandbox. clientId={} resolvedPath={}",
+          clientId, filePath
+        );
+        return;
       }
+
+      Files.createDirectories(filePath.getParent());
       Files.writeString(filePath, code, StandardCharsets.UTF_8);
     } catch (IOException e) {
       logger.error("Failed writing local fallback file", e);
     }
+  }
+
+  /** Truncates a string for safe log output (reused from main filter). */
+  private static String sanitiseForLog(String s) {
+    if (s == null) return "<null>";
+    return s.length() <= 120 ? s : s.substring(0, 120) + "...[truncated]";
   }
 
   // --------------------------------------------------------------------------

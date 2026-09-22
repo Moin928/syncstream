@@ -1,6 +1,10 @@
 /**
  * SyncStream Lightweight GitHub-Flavored Markdown (GFM) Renderer
  * Converts Markdown text into clean, styled HTML for live documentation preview.
+ *
+ * Security: All user-controlled values are HTML-escaped before insertion.
+ * Link and image URLs are validated to block javascript:, data:, vbscript:,
+ * and blob: protocol injection.
  */
 
 function escapeHtml(text) {
@@ -13,6 +17,56 @@ function escapeHtml(text) {
 }
 
 /**
+ * Sanitizes a URL so that only safe protocols are allowed.
+ * Returns "#" for any URL that uses a dangerous protocol or
+ * is otherwise suspicious.
+ *
+ * Blocked: javascript:, data:, vbscript:, blob:, about:,
+ *          file:, and anything with URL-encoded variants.
+ *
+ * @param {string} url - The raw URL from the Markdown source
+ * @returns {string} A safe URL or "#"
+ */
+function sanitizeUrl(url) {
+  if (!url || typeof url !== "string") return "#";
+
+  // Trim whitespace and null bytes
+  const trimmed = url.trim().replace(/\0/g, "");
+
+  // Decode percent-encoding and strip whitespace chars used to obfuscate protocols
+  // e.g. "java&#10;script:" or "j%61vascript:"
+  let decoded = trimmed;
+  try {
+    decoded = decodeURIComponent(trimmed.replace(/&#?\w+;/g, "")).toLowerCase();
+  } catch {
+    decoded = trimmed.toLowerCase();
+  }
+
+  // Strip ASCII control characters (0x00-0x1F) used to bypass checks
+  decoded = decoded.replace(/[\u0000-\u001F]/g, "");
+
+  // Block dangerous protocols
+  const BLOCKED_PROTOCOLS = [
+    "javascript:",
+    "vbscript:",
+    "data:",
+    "blob:",
+    "about:",
+    "file:",
+    "jar:",
+  ];
+
+  for (const proto of BLOCKED_PROTOCOLS) {
+    if (decoded.startsWith(proto)) {
+      return "#";
+    }
+  }
+
+  // Allow relative URLs and safe absolute URLs (http, https, mailto, #, /)
+  return trimmed;
+}
+
+/**
  * Parses inline Markdown formatting (bold, italic, code, links, images, strike).
  */
 function parseInline(text) {
@@ -21,13 +75,23 @@ function parseInline(text) {
   // Images: ![alt](url)
   out = out.replace(
     /!\[([^\]]*)\]\(([^)]+)\)/g,
-    '<img src="$2" alt="$1" class="md-img" style="max-width:100%;border-radius:6px;margin:8px 0;" />'
+    (_match, alt, rawUrl) => {
+      const safeUrl = sanitizeUrl(rawUrl);
+      // Only allow http/https image sources (block data:, blob:, etc.)
+      const isHttpUrl = safeUrl.startsWith("http://") || safeUrl.startsWith("https://");
+      const src = isHttpUrl ? escapeHtml(safeUrl) : "#";
+      return `<img src="${src}" alt="${escapeHtml(alt)}" class="md-img" style="max-width:100%;border-radius:6px;margin:8px 0;" />`;
+    }
   );
 
   // Links: [text](url)
   out = out.replace(
     /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer" class="md-link text-[#58a6ff] underline underline-offset-2 hover:text-[#79c0ff]">$1</a>'
+    (_match, linkText, rawUrl) => {
+      const safeUrl = sanitizeUrl(rawUrl);
+      const href = escapeHtml(safeUrl);
+      return `<a href="${href}" target="_blank" rel="noopener noreferrer nofollow" class="md-link text-[#58a6ff] underline underline-offset-2 hover:text-[#79c0ff]">${linkText}</a>`;
+    }
   );
 
   // Inline code: `code`
@@ -136,7 +200,7 @@ export function renderMarkdown(markdown) {
         const codeContent = escapeHtml(codeBlockLines.join("\n"));
         html.push(
           `<div class="md-code-block my-3 rounded-lg overflow-hidden border border-[#30363d] bg-[#0d1117]"><div class="flex items-center justify-between px-3 py-1.5 bg-[#161b22] border-b border-[#30363d] text-[11px] font-mono text-[#8b949e]"><span>${
-            codeBlockLang || "code"
+            escapeHtml(codeBlockLang || "code")
           }</span></div><pre class="p-3 overflow-x-auto font-mono text-xs leading-relaxed text-[#c9d1d9]"><code>${codeContent}</code></pre></div>`
         );
         inCodeBlock = false;
