@@ -485,6 +485,21 @@ function App() {
   // Advanced Share & Embed Dialog Modal
   const [shareModalOpen, setShareModalOpen] = useState(false)
   const [copiedKey, setCopiedKey] = useState(null)
+  const [shareTokens, setShareTokens] = useState({ editor: "", viewer: "" })
+
+  useEffect(() => {
+    if (shareModalOpen && room) {
+      Promise.all([
+        fetch(`http://${window.location.hostname}:8080/api/rooms/${encodeURIComponent(room)}/token?role=editor`).then(r => r.json()).catch(() => ({})),
+        fetch(`http://${window.location.hostname}:8080/api/rooms/${encodeURIComponent(room)}/token?role=viewer`).then(r => r.json()).catch(() => ({}))
+      ]).then(([ed, vw]) => {
+        setShareTokens({
+          editor: ed?.token || "",
+          viewer: vw?.token || ""
+        })
+      }).catch(() => {})
+    }
+  }, [shareModalOpen, room])
 
   // Live Markdown Preview (.md / .markdown files)
   const [markdownPreviewOpen, setMarkdownPreviewOpen] = useState(false)
@@ -1158,7 +1173,8 @@ function App() {
       () => {
         setDocumentReady(true)
       },
-      new URLSearchParams(window.location.search).get("role") || "editor"
+      new URLSearchParams(window.location.search).get("role") || "editor",
+      new URLSearchParams(window.location.search).get("token") || ""
     )
 
     providerRef.current = provider
@@ -1276,12 +1292,14 @@ function App() {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
     const clientId = providerRef.current?.clientId || ""
     const urlRole = new URLSearchParams(window.location.search).get("role") || myRole || "editor"
+    const urlToken = new URLSearchParams(window.location.search).get("token") || ""
+    const tokenQuery = urlToken ? `&token=${encodeURIComponent(urlToken)}` : ""
     const socket = new WebSocket(
       `${protocol}//${window.location.hostname}:8080/ws/terminal?room=${encodeURIComponent(
         room
       )}&username=${encodeURIComponent(
         username
-      )}&clientId=${encodeURIComponent(clientId)}&role=${encodeURIComponent(urlRole)}`
+      )}&clientId=${encodeURIComponent(clientId)}&role=${encodeURIComponent(urlRole)}${tokenQuery}`
     )
 
     socket.binaryType = "arraybuffer"
@@ -5558,7 +5576,7 @@ function App() {
                   <input
                     type="text"
                     readOnly
-                    value={`${window.location.origin}${window.location.pathname}?room=${room}&role=editor`}
+                    value={`${window.location.origin}${window.location.pathname}?room=${room}&role=editor${shareTokens.editor ? `&token=${encodeURIComponent(shareTokens.editor)}` : ''}`}
                     className="share-link-input"
                   />
                   <button
@@ -5566,7 +5584,7 @@ function App() {
                     onClick={() =>
                       handleCopyShareLink(
                         "editor",
-                        `${window.location.origin}${window.location.pathname}?room=${room}&role=editor`
+                        `${window.location.origin}${window.location.pathname}?room=${room}&role=editor${shareTokens.editor ? `&token=${encodeURIComponent(shareTokens.editor)}` : ''}`
                       )
                     }
                     className={`share-copy-btn ${copiedKey === "editor" ? "copied" : ""}`}
@@ -5586,7 +5604,7 @@ function App() {
                   <input
                     type="text"
                     readOnly
-                    value={`${window.location.origin}${window.location.pathname}?room=${room}&role=viewer`}
+                    value={`${window.location.origin}${window.location.pathname}?room=${room}&role=viewer${shareTokens.viewer ? `&token=${encodeURIComponent(shareTokens.viewer)}` : ''}`}
                     className="share-link-input"
                   />
                   <button
@@ -5594,7 +5612,7 @@ function App() {
                     onClick={() =>
                       handleCopyShareLink(
                         "viewer",
-                        `${window.location.origin}${window.location.pathname}?room=${room}&role=viewer`
+                        `${window.location.origin}${window.location.pathname}?room=${room}&role=viewer${shareTokens.viewer ? `&token=${encodeURIComponent(shareTokens.viewer)}` : ''}`
                       )
                     }
                     className={`share-copy-btn ${copiedKey === "viewer" ? "copied" : ""}`}
@@ -5614,7 +5632,7 @@ function App() {
                   <input
                     type="text"
                     readOnly
-                    value={`<iframe src="${window.location.origin}${window.location.pathname}?room=${room}&role=viewer" width="100%" height="600" frameborder="0" allow="clipboard-write"></iframe>`}
+                    value={`<iframe src="${window.location.origin}${window.location.pathname}?room=${room}&role=viewer${shareTokens.viewer ? `&token=${encodeURIComponent(shareTokens.viewer)}` : ''}" width="100%" height="600" frameborder="0" allow="clipboard-write"></iframe>`}
                     className="share-link-input"
                   />
                   <button
@@ -5622,7 +5640,7 @@ function App() {
                     onClick={() =>
                       handleCopyShareLink(
                         "embed",
-                        `<iframe src="${window.location.origin}${window.location.pathname}?room=${room}&role=viewer" width="100%" height="600" frameborder="0" allow="clipboard-write"></iframe>`
+                        `<iframe src="${window.location.origin}${window.location.pathname}?room=${room}&role=viewer${shareTokens.viewer ? `&token=${encodeURIComponent(shareTokens.viewer)}` : ''}" width="100%" height="600" frameborder="0" allow="clipboard-write"></iframe>`
                       )
                     }
                     className={`share-copy-btn ${copiedKey === "embed" ? "copied" : ""}`}

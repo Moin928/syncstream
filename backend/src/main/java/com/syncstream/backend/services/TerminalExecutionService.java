@@ -369,14 +369,30 @@ public class TerminalExecutionService {
     return localPb.start();
   }
 
+  /** Max total output bytes allowed per execution to prevent browser freeze/DoS (500 KB). */
+  private static final int MAX_OUTPUT_BYTES = 500 * 1024;
+
   /**
    * Reads the process stdout/stderr in chunks and forwards immediately to the WebSocket.
+   * Enforces a hard output ceiling of {@value #MAX_OUTPUT_BYTES} bytes.
    */
   private void streamOutput(WebSocketSession socket, Process process) throws IOException {
     try (InputStream is = process.getInputStream()) {
       byte[] buffer = new byte[1024];
       int length;
+      int totalBytesRead = 0;
+
       while ((length = is.read(buffer)) != -1) {
+        totalBytesRead += length;
+
+        if (totalBytesRead > MAX_OUTPUT_BYTES) {
+          sendSafely(socket, "\r\n\u001B[33m[SyncStream] Maximum output limit exceeded (500 KB). Output truncated & process stopped.\u001B[0m\r\n");
+          if (process.isAlive()) {
+            process.destroyForcibly();
+          }
+          break;
+        }
+
         String chunk = new String(buffer, 0, length, StandardCharsets.UTF_8);
         // Normalize newlines for xterm display
         String normalized = chunk.replace("\r\n", "\n").replace("\n", "\r\n");

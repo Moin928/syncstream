@@ -3,11 +3,13 @@ package com.syncstream.backend.controllers;
 import com.syncstream.backend.models.Room;
 import com.syncstream.backend.repositories.RoomRepository;
 import com.syncstream.backend.services.RateLimitingService;
+import com.syncstream.backend.services.SecurityTokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -19,13 +21,16 @@ public class RoomController {
 
   private final RoomRepository roomRepository;
   private final RateLimitingService rateLimitingService;
+  private final SecurityTokenService securityTokenService;
 
   public RoomController(
     RoomRepository roomRepository,
-    RateLimitingService rateLimitingService
+    RateLimitingService rateLimitingService,
+    SecurityTokenService securityTokenService
   ) {
     this.roomRepository = roomRepository;
     this.rateLimitingService = rateLimitingService;
+    this.securityTokenService = securityTokenService;
   }
 
   @PostMapping
@@ -78,6 +83,44 @@ public class RoomController {
     }
 
     return ResponseEntity.ok().build();
+  }
+
+  /**
+   * Generates a cryptographically signed HMAC role token for room invite links.
+   */
+  @GetMapping("/{roomId}/token")
+  public ResponseEntity<Map<String, String>> getRoleToken(
+    @PathVariable String roomId,
+    @RequestParam(defaultValue = "editor") String role,
+    HttpServletRequest request
+  ) {
+    String clientIp = getClientIp(request);
+
+    // Rate limit: max 60 token generations per minute per IP
+    if (!rateLimitingService.allowRequest(clientIp, "get_token", 60, 60_000)) {
+      return ResponseEntity
+        .status(HttpStatus.TOO_MANY_REQUESTS)
+        .build();
+    }
+
+    if (roomId == null || !ROOM_ID_PATTERN.matcher(roomId).matches()) {
+      return ResponseEntity
+        .badRequest()
+        .build();
+    }
+
+    if (!roomRepository.existsById(roomId)) {
+      return ResponseEntity
+        .notFound()
+        .build();
+    }
+
+    String token = securityTokenService.generateRoleToken(roomId, role);
+    return ResponseEntity.ok(Map.of(
+      "roomId", roomId,
+      "role", role.toLowerCase(),
+      "token", token
+    ));
   }
 
   private String getClientIp(HttpServletRequest request) {

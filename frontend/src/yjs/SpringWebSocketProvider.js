@@ -19,7 +19,8 @@ export class SpringWebSocketProvider {
     onSelectionChange,
     onConnectionStateChange,
     onSyncComplete,
-    role = "editor"
+    role = "editor",
+    token = ""
   ) {
     this.clientId = crypto.randomUUID()
 
@@ -27,6 +28,7 @@ export class SpringWebSocketProvider {
     this.ydoc = ydoc
     this.username = username
     this.role = role
+    this.token = token
 
     this.onUsersChange = onUsersChange
     this.onCursorChange = onCursorChange
@@ -121,6 +123,7 @@ export class SpringWebSocketProvider {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
     const host = window.location.hostname || "localhost"
     const port = "8080"
+    const tokenQuery = this.token ? `&token=${encodeURIComponent(this.token)}` : ""
 
     const socket =
       new WebSocket(
@@ -132,7 +135,7 @@ export class SpringWebSocketProvider {
           this.role || "editor"
         )}&username=${encodeURIComponent(
           this.username || "User"
-        )}`
+        )}${tokenQuery}`
       )
 
     this.socket = socket

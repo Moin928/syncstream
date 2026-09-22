@@ -1,5 +1,6 @@
 package com.syncstream.backend.websocket;
 
+import com.syncstream.backend.services.SecurityTokenService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -24,6 +25,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
 
   private final CodeWebSocketHandler codeWebSocketHandler;
   private final TerminalWebSocketHandler terminalWebSocketHandler;
+  private final SecurityTokenService securityTokenService;
 
   /**
    * Allowed origin patterns, configurable via environment/application.properties.
@@ -34,10 +36,12 @@ public class WebSocketConfig implements WebSocketConfigurer {
 
   public WebSocketConfig(
     CodeWebSocketHandler codeWebSocketHandler,
-    TerminalWebSocketHandler terminalWebSocketHandler
+    TerminalWebSocketHandler terminalWebSocketHandler,
+    SecurityTokenService securityTokenService
   ) {
     this.codeWebSocketHandler = codeWebSocketHandler;
     this.terminalWebSocketHandler = terminalWebSocketHandler;
+    this.securityTokenService = securityTokenService;
   }
 
   @Override
@@ -46,12 +50,12 @@ public class WebSocketConfig implements WebSocketConfigurer {
 
     registry
       .addHandler(codeWebSocketHandler, "/ws")
-      .addInterceptors(new RoomHandshakeInterceptor())
+      .addInterceptors(new RoomHandshakeInterceptor(securityTokenService))
       .setAllowedOrigins(origins);
 
     registry
       .addHandler(terminalWebSocketHandler, "/ws/terminal")
-      .addInterceptors(new RoomHandshakeInterceptor())
+      .addInterceptors(new RoomHandshakeInterceptor(securityTokenService))
       .setAllowedOrigins(origins);
   }
 
@@ -60,7 +64,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
     ServletServerContainerFactoryBean container =
       new ServletServerContainerFactoryBean();
 
-    // 2 MB cap — rejects abnormally large binary frames (was 10 MB, overkill)
+    // 2 MB cap — rejects abnormally large binary frames
     container.setMaxBinaryMessageBufferSize(2 * 1024 * 1024);
 
     // 128 KB cap for text messages (terminal commands, presence JSON)

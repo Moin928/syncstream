@@ -1,5 +1,6 @@
 package com.syncstream.backend.websocket;
 
+import com.syncstream.backend.services.SecurityTokenService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.server.ServerHttpRequest;
@@ -23,9 +24,9 @@ import java.util.regex.Pattern;
  *   <li>Values are URL-decoded using UTF-8 before validation.</li>
  *   <li>{@code clientId} must be a valid UUID (RFC 4122 format).</li>
  *   <li>{@code room} must be alphanumeric with optional hyphens, 1–64 chars.</li>
- *   <li>{@code role} must be one of {viewer, editor, admin, owner} (defaults to editor).</li>
+ *   <li>{@code role} is cryptographically verified via HMAC-SHA256 {@code token} for privileged roles (owner, admin).</li>
  *   <li>{@code username} is validated and sanitized (if provided).</li>
- *   <li>Any parameter that fails validation closes the handshake immediately.</li>
+ *   <li>Any parameter that fails structural validation closes the handshake immediately.</li>
  * </ul>
  */
 public class RoomHandshakeInterceptor implements HandshakeInterceptor {
@@ -50,6 +51,12 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
     "viewer", "editor", "admin", "owner"
   );
 
+  private final SecurityTokenService securityTokenService;
+
+  public RoomHandshakeInterceptor(SecurityTokenService securityTokenService) {
+    this.securityTokenService = securityTokenService;
+  }
+
   @Override
   public boolean beforeHandshake(
     ServerHttpRequest request,
@@ -68,6 +75,7 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
     String room     = null;
     String clientId = null;
     String role     = "editor";
+    String token    = null;
     String username = null;
 
     // Parse and URL-decode each parameter
@@ -90,6 +98,7 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
               role = lowerRole;
             }
           }
+          case "token" -> token = value;
           case "username" -> username = sanitizeUsername(value);
           default -> {}
         }
@@ -126,6 +135,16 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
       logger.warn("WebSocket handshake rejected: invalid clientId format from {}",
         request.getRemoteAddress());
       return false;
+    }
+
+    // Cryptographic role verification: privileged roles (owner, admin) require valid HMAC token
+    if (("owner".equals(role) || "admin".equals(role)) && securityTokenService != null) {
+      boolean valid = securityTokenService.verifyRoleToken(room, role, token);
+      if (!valid) {
+        logger.warn("Unverified privileged role attempt ('{}') for room '{}' without valid HMAC token. Downgrading to editor.",
+          role, sanitize(room));
+        role = "editor";
+      }
     }
 
     // All checks passed — store in session attributes
