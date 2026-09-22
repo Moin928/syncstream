@@ -52,6 +52,7 @@ services:
     networks:
       - syncstream-db-net
       - syncstream-runner-net
+      - syncstream-app-net
 
 
   runner:
@@ -82,6 +83,23 @@ services:
       - syncstream-runner-net
 
 
+  frontend:
+    build:
+      context: ./frontend
+
+    container_name: syncstream-frontend
+    restart: unless-stopped
+
+    ports:
+      - "5173:80"
+
+    depends_on:
+      - backend
+
+    networks:
+      - syncstream-app-net
+
+
 networks:
   syncstream-db-net:
     driver: bridge
@@ -89,6 +107,9 @@ networks:
   syncstream-runner-net:
     driver: bridge
     internal: true
+
+  syncstream-app-net:
+    driver: bridge
 
 
 volumes:
