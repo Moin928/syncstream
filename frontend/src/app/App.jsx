@@ -1308,7 +1308,6 @@ function App() {
     terminalSocketRef.current = socket
 
     socket.onopen = () => {
-      console.log("Terminal WebSocket connected")
     }
 
     socket.onmessage = (event) => {
