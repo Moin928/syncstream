@@ -333,7 +333,8 @@ select {
   opacity: 1;
 }
 
-.tree-chevron-btn {
+.tree-chevron-btn,
+.tree-action-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -346,29 +347,17 @@ select {
   color: #8b949e;
   cursor: pointer;
   transition: all 0.15s ease;
+}
+
+.tree-chevron-btn {
   flex-shrink: 0;
 }
 
-.tree-chevron-btn:hover {
-  background: #30363d;
-  color: #f0f6fc;
-}
-
 .tree-action-btn {
-  width: 18px;
-  height: 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 3px;
-  border: none;
-  background: transparent;
-  color: #8b949e;
-  cursor: pointer;
   font-size: 11px;
-  transition: all 0.15s ease;
 }
 
+.tree-chevron-btn:hover,
 .tree-action-btn:hover {
   background: #30363d;
   color: #f0f6fc;
