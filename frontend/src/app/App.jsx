@@ -2997,11 +2997,20 @@ function App() {
     window.history.pushState({}, "", window.location.pathname)
   }
 
-  const errorsCount = diagnostics.filter((d) => d.severity === SEVERITY.ERROR).length
-  const warningsCount = diagnostics.filter((d) => d.severity === SEVERITY.WARNING).length
+  const errorsCount = useMemo(
+    () => diagnostics.filter((d) => d.severity === SEVERITY.ERROR).length,
+    [diagnostics]
+  )
+  const warningsCount = useMemo(
+    () => diagnostics.filter((d) => d.severity === SEVERITY.WARNING).length,
+    [diagnostics]
+  )
 
-  const visibleFilePaths = fileList.filter((f) => !f.endsWith(".keep") || fileList.length === 1)
-  const fileTree = buildTreeFromPaths(fileList)
+  const visibleFilePaths = useMemo(
+    () => fileList.filter((f) => !f.endsWith(".keep") || fileList.length === 1),
+    [fileList]
+  )
+  const fileTree = useMemo(() => buildTreeFromPaths(fileList), [fileList])
 
   /**
    * Recursive tree item renderer for VS Code style directory tree.
