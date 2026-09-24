@@ -779,7 +779,7 @@ function App() {
     }
   }
 
-  const handleSendChat = (e) => {
+  const handleSendChat = useCallback((e) => {
     e?.preventDefault()
     const trimmed = chatInputText.trim()
     if (!trimmed) return
@@ -793,7 +793,7 @@ function App() {
 
     ychat.push([msg])
     setChatInputText("")
-  }
+  }, [chatInputText, username, ychat])
 
   /*
    * Debounced diagnostics validation.
@@ -2354,13 +2354,13 @@ function App() {
     }
   }
 
-  const handleSelectFile = (filePath) => {
+  const handleSelectFile = useCallback((filePath) => {
     if (filePath.endsWith(".keep")) return
     setOpenTabs((prev) => (prev.includes(filePath) ? prev : [...prev, filePath]))
     setActiveFile(filePath)
-  }
+  }, [])
 
-  const handleCloseTab = (fileName, event) => {
+  const handleCloseTab = useCallback((fileName, event) => {
     event?.stopPropagation()
     const newTabs = openTabs.filter((f) => f !== fileName)
     setOpenTabs(newTabs)
@@ -2371,7 +2371,7 @@ function App() {
         setActiveFile("")
       }
     }
-  }
+  }, [openTabs, activeFile])
 
   const handleCloseOtherTabs = (fileName) => {
     setOpenTabs([fileName])
@@ -2549,7 +2549,7 @@ function App() {
     setRenameInput("")
   }
 
-  const toggleFolder = (folderPath, event) => {
+  const toggleFolder = useCallback((folderPath, event) => {
     event?.stopPropagation()
     setExpandedFolders((prev) => {
       const next = new Set(prev)
@@ -2560,9 +2560,9 @@ function App() {
       }
       return next
     })
-  }
+  }, [])
 
-  const handleCollapseAllFolders = () => {
+  const handleCollapseAllFolders = useCallback(() => {
     if (expandedFolders.size > 0) {
       setExpandedFolders(new Set())
     } else {
@@ -2578,7 +2578,7 @@ function App() {
       traverse(fileTree)
       setExpandedFolders(allFolders)
     }
-  }
+  }, [expandedFolders, fileTree])
 
   /*
    * ==========================================================================
