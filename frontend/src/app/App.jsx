@@ -2246,6 +2246,11 @@ function App() {
   }
 
   // File and Folder Operations
+  const resetCreatingNode = useCallback(() => {
+    setIsCreatingNode(null)
+    setNewPathInput("")
+  }, [])
+
   const handleCreateNode = (pathInput, isFolder = false) => {
     if (isSubmittingNodeRef.current) return
     isSubmittingNodeRef.current = true
@@ -2255,15 +2260,13 @@ function App() {
 
     const trimmed = pathInput.trim()
     if (!trimmed) {
-      setIsCreatingNode(null)
-      setNewPathInput("")
+      resetCreatingNode()
       return
     }
 
     const cleanPath = trimmed.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
     if (!cleanPath) {
-      setIsCreatingNode(null)
-      setNewPathInput("")
+      resetCreatingNode()
       return
     }
 
@@ -2298,8 +2301,7 @@ function App() {
       setActiveFile(cleanPath)
     }
 
-    setIsCreatingNode(null)
-    setNewPathInput("")
+    resetCreatingNode()
   }
 
   const handleDeleteFile = (filePath, event) => {
@@ -3175,15 +3177,14 @@ function App() {
                         handleCreateNode(full, isCreatingNode.type === "folder")
                       }
                       if (e.key === "Escape") {
-                        setIsCreatingNode(null)
-                        setNewPathInput("")
+                        resetCreatingNode()
                       }
                     }}
                     onBlur={() => {
                       if (newPathInput.trim()) {
                         handleCreateNode(`${node.path}/${newPathInput}`, isCreatingNode.type === "folder")
                       } else {
-                        setIsCreatingNode(null)
+                        resetCreatingNode()
                       }
                     }}
                     className="tree-inline-input"
@@ -4096,15 +4097,14 @@ function App() {
                               handleCreateNode(newPathInput, isCreatingNode.type === "folder")
                             }
                             if (e.key === "Escape") {
-                              setIsCreatingNode(null)
-                              setNewPathInput("")
+                              resetCreatingNode()
                             }
                           }}
                           onBlur={() => {
                             if (newPathInput.trim()) {
                               handleCreateNode(newPathInput, isCreatingNode.type === "folder")
                             } else {
-                              setIsCreatingNode(null)
+                              resetCreatingNode()
                             }
                           }}
                           className="tree-inline-input"
