@@ -1,21 +1,50 @@
 /**
- * SyncStream Multi-Language Advanced Completion & IntelliSense Provider
+ * SyncStream Multi-Language Code Completion Provider
  *
- * Features:
- * 1. Live Document Symbol Extraction:
- *    - All Classes, Interfaces, Enums, Records, Structs
- *    - All Constructors (e.g. `Main()`, `ClassName()`)
- *    - All Class Fields & Constants (e.g. `age`, `name`, `MAX_VALUE`)
- *    - All Methods with signatures & parameter placeholders (e.g. `sayHello()`, `setName(name)`)
- *    - All Local Variables & Method Parameters (e.g. `m`, `count`, `args`)
- * 2. Context-Aware Suggestion Filtering:
- *    - After `class` / `public class`: Suppresses method snippets (prevents `Main` from being hijacked by `main()`)
- *    - After `new `: Specifically prioritizes Classes and Constructors (`Main()`, `ArrayList<>()`, `Scanner(...)`)
- *    - In expressions: Uses `psvm` for `public static void main` so typing `Main` never triggers `main` method replacement
- * 3. Member Access (`.` Trigger):
- *    - Comprehensive standard library methods for `String`, `List`, `Map`, `Set`, `Stream`, `Optional`, `Object`, `Array`
- *    - Live fields and methods of classes defined in the file and workspace
+ * Strategy (reliable, VS Code-like, low-overhead):
+ * 1. Extract ALL identifiers from the document as word suggestions
+ *    (catches variables, classes, method names — anything you've typed)
+ * 2. Context-sensitive static snippets (psvm, sout, fori, for, if…)
+ * 3. Standard library builtins (System.out.println, Math.max…)
+ * 4. Member access suggestions when triggered by "."
+ * 5. Context guards (suppress method snippets on class-declaration lines)
  */
+
+// ---------------------------------------------------------------------------
+// Keyword sets (used to exclude from word suggestions)
+// ---------------------------------------------------------------------------
+
+const JAVA_KEYWORDS = new Set([
+  'abstract','assert','boolean','break','byte','case','catch','char','class',
+  'continue','default','do','double','else','enum','extends','final','finally',
+  'float','for','if','implements','import','instanceof','int','interface','long',
+  'native','new','null','package','private','protected','public','record',
+  'return','sealed','short','static','strictfp','super','switch','synchronized',
+  'this','throw','throws','transient','try','var','void','volatile','while','yield',
+  'true','false','String','System','Math','Arrays','Collections','Object',
+]);
+
+const PYTHON_KEYWORDS = new Set([
+  'False','None','True','and','as','assert','async','await','break','class',
+  'continue','def','del','elif','else','except','finally','for','from','global',
+  'if','import','in','is','lambda','nonlocal','not','or','pass','raise',
+  'return','try','while','with','yield','print','len','range','type','input',
+]);
+
+const CPP_KEYWORDS = new Set([
+  'auto','bool','break','case','catch','char','class','const','constexpr',
+  'continue','default','delete','do','double','else','enum','explicit','extern',
+  'false','float','for','friend','if','inline','int','long','namespace','new',
+  'nullptr','private','protected','public','return','short','signed','sizeof',
+  'static','struct','switch','template','this','throw','true','try','typedef',
+  'typename','union','unsigned','using','virtual','void','volatile','while',
+]);
+
+const KEYWORD_SETS = {
+  java: JAVA_KEYWORDS, python: PYTHON_KEYWORDS,
+  cpp: CPP_KEYWORDS, c: CPP_KEYWORDS,
+  csharp: JAVA_KEYWORDS, kotlin: JAVA_KEYWORDS,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -23,732 +52,483 @@
 
 function kw(word) {
   return {
-    label: word,
-    kind: 17, // CompletionItemKind.Keyword
-    detail: 'keyword',
-    insertText: word,
-    sortText: '20_' + word,
-    filterText: word,
+    label: word, kind: 17,
+    insertText: word, sortText: 'z_kw_' + word, filterText: word,
   };
 }
 
-function snip(label, body, detail, doc, sortOrder = '30', filterText = label) {
-  const item = {
-    label,
-    kind: 27, // CompletionItemKind.Snippet
-    detail: detail || 'Snippet',
-    insertText: body,
-    insertTextRules: 4, // InsertTextRule.InsertAsSnippet
-    sortText: `${sortOrder}_${label}`,
-    filterText,
-  };
-  if (doc) item.documentation = { value: doc };
-  return item;
-}
-
-function builtin(label, insertText, detail, doc, isSnippet = false, sortOrder = '25') {
-  const item = {
-    label,
-    kind: 1, // CompletionItemKind.Function
-    detail: detail || '',
-    insertText,
-    sortText: `${sortOrder}_${label}`,
-    filterText: label,
-  };
-  if (isSnippet) item.insertTextRules = 4;
-  if (doc) item.documentation = { value: doc };
-  return item;
-}
-
-function typeConstructor(name, params = '', kind = 2) {
+function snip(label, body, detail, filterText) {
   return {
-    label: `${name}()`,
-    kind, // CompletionItemKind.Constructor
-    detail: `new ${name}(${params})`,
-    insertText: params ? `${name}(\${1:${params}})` : `${name}()`,
-    insertTextRules: 4,
-    sortText: `00_${name}`,
-    filterText: name,
-    documentation: { value: `**Constructor:** \`new ${name}(${params})\`` },
+    label, kind: 27, detail: detail || 'Snippet',
+    insertText: body, insertTextRules: 4,
+    sortText: 'c_' + label,
+    filterText: filterText || label,
+  };
+}
+
+function api(label, insertText, detail, isSnippet) {
+  return {
+    label, kind: 1, detail: detail || '',
+    insertText, insertTextRules: isSnippet ? 4 : undefined,
+    sortText: 'b_' + label, filterText: label,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Standard Common Constructors for 'new'
+// Static Snippets per language
 // ---------------------------------------------------------------------------
 
-const JAVA_COMMON_CONSTRUCTORS = [
-  typeConstructor('ArrayList', ''),
-  typeConstructor('HashMap', ''),
-  typeConstructor('HashSet', ''),
-  typeConstructor('LinkedList', ''),
-  typeConstructor('TreeMap', ''),
-  typeConstructor('TreeSet', ''),
-  typeConstructor('StringBuilder', ''),
-  typeConstructor('StringBuffer', ''),
-  typeConstructor('Scanner', 'System.in'),
-  typeConstructor('Random', ''),
-  typeConstructor('File', 'path'),
-  typeConstructor('Thread', 'runnable'),
-  typeConstructor('Date', ''),
-  typeConstructor('Exception', 'message'),
-  typeConstructor('RuntimeException', 'message'),
-  typeConstructor('IllegalArgumentException', 'message'),
-];
+const SNIPPETS = {
+  java: [
+    snip('psvm', 'public static void main(String[] args) {\n    ${1:// TODO}\n}', 'public static void main(String[] args)', 'psvm'),
+    snip('main', 'public static void main(String[] args) {\n    ${1:// TODO}\n}', 'main method', 'main'),
+    snip('sout', 'System.out.println(${1:value});', 'System.out.println', 'sout'),
+    snip('souf', 'System.out.printf("${1:%s}%n", ${2:args});', 'System.out.printf', 'souf'),
+    snip('fori', 'for (int ${1:i} = 0; ${1:i} < ${2:n}; ${1:i}++) {\n    ${3:// body}\n}', 'indexed for loop', 'fori'),
+    snip('foreach', 'for (${1:Type} ${2:item} : ${3:collection}) {\n    ${4:// body}\n}', 'enhanced for-each loop', 'foreach'),
+    snip('if', 'if (${1:condition}) {\n    ${2:// body}\n}', 'if statement', 'if'),
+    snip('ifelse', 'if (${1:condition}) {\n    ${2:// body}\n} else {\n    ${3:// else}\n}', 'if-else', 'ifelse'),
+    snip('while', 'while (${1:condition}) {\n    ${2:// body}\n}', 'while loop', 'while'),
+    snip('dowhile', 'do {\n    ${1:// body}\n} while (${2:condition});', 'do-while loop', 'dowhile'),
+    snip('switch', 'switch (${1:expr}) {\n    case ${2:value}:\n        ${3:// body}\n        break;\n    default:\n        break;\n}', 'switch statement', 'switch'),
+    snip('try', 'try {\n    ${1:// body}\n} catch (${2:Exception} ${3:e}) {\n    ${4:e.printStackTrace()}\n}', 'try-catch', 'try'),
+    snip('trycatch', 'try {\n    ${1:// body}\n} catch (${2:Exception} ${3:e}) {\n    ${4:e.printStackTrace()}\n} finally {\n    ${5:// cleanup}\n}', 'try-catch-finally', 'trycatch'),
+    snip('class', 'public class ${1:ClassName} {\n    ${2:// body}\n}', 'public class', 'class'),
+    snip('interface', 'public interface ${1:Name} {\n    ${2:// methods}\n}', 'interface', 'interface'),
+    snip('enum', 'public enum ${1:Name} {\n    ${2:VALUE1}, ${3:VALUE2}\n}', 'enum', 'enum'),
+    snip('record', 'public record ${1:Name}(${2:Type} ${3:field}) {}', 'record', 'record'),
+    snip('lambda', '(${1:args}) -> ${2:expr}', 'lambda expression', 'lambda'),
+    snip('ternary', '${1:condition} ? ${2:thenExpr} : ${3:elseExpr}', 'ternary operator', 'ternary'),
+    snip('arrlist', 'new ArrayList<${1:Type}>()', 'new ArrayList', 'arrlist'),
+    snip('hashmap', 'new HashMap<${1:K}, ${2:V}>()', 'new HashMap', 'hashmap'),
+  ],
+  python: [
+    snip('def', 'def ${1:name}(${2:args}):\n    ${3:pass}', 'function definition', 'def'),
+    snip('class', 'class ${1:ClassName}:\n    def __init__(self${2:, args}):\n        ${3:pass}', 'class definition', 'class'),
+    snip('if', 'if ${1:condition}:\n    ${2:pass}', 'if', 'if'),
+    snip('ifelse', 'if ${1:condition}:\n    ${2:pass}\nelse:\n    ${3:pass}', 'if-else', 'ifelse'),
+    snip('for', 'for ${1:item} in ${2:iterable}:\n    ${3:pass}', 'for loop', 'for'),
+    snip('forrange', 'for ${1:i} in range(${2:10}):\n    ${3:pass}', 'for range loop', 'forrange'),
+    snip('while', 'while ${1:condition}:\n    ${2:pass}', 'while loop', 'while'),
+    snip('try', 'try:\n    ${1:pass}\nexcept ${2:Exception} as ${3:e}:\n    ${4:pass}', 'try-except', 'try'),
+    snip('with', 'with ${1:open("file")} as ${2:f}:\n    ${3:pass}', 'with', 'with'),
+    snip('lambda', 'lambda ${1:args}: ${2:expr}', 'lambda', 'lambda'),
+    snip('main', 'def main():\n    ${1:pass}\n\nif __name__ == "__main__":\n    main()', 'main guard', 'main'),
+    snip('lc', '[${1:expr} for ${2:x} in ${3:iterable}]', 'list comprehension', 'lc'),
+  ],
+  cpp: [
+    snip('main', '#include <iostream>\nusing namespace std;\nint main() {\n    ${1:// body}\n    return 0;\n}', 'main function', 'main'),
+    snip('class', 'class ${1:Name} {\npublic:\n    ${2:// members}\n};', 'class', 'class'),
+    snip('struct', 'struct ${1:Name} {\n    ${2:// fields}\n};', 'struct', 'struct'),
+    snip('if', 'if (${1:condition}) {\n    ${2:// body}\n}', 'if', 'if'),
+    snip('for', 'for (int ${1:i} = 0; ${1:i} < ${2:n}; ++${1:i}) {\n    ${3:// body}\n}', 'for loop', 'for'),
+    snip('rangefor', 'for (const auto& ${1:item} : ${2:container}) {\n    ${3:// body}\n}', 'range-for', 'rangefor'),
+    snip('while', 'while (${1:condition}) {\n    ${2:// body}\n}', 'while loop', 'while'),
+    snip('cout', 'cout << ${1:value} << endl;', 'cout', 'cout'),
+    snip('cin', 'cin >> ${1:variable};', 'cin', 'cin'),
+  ],
+  c: [
+    snip('main', '#include <stdio.h>\nint main(void) {\n    ${1:// body}\n    return 0;\n}', 'main', 'main'),
+    snip('if', 'if (${1:condition}) {\n    ${2:// body}\n}', 'if', 'if'),
+    snip('for', 'for (int ${1:i} = 0; ${1:i} < ${2:n}; ++${1:i}) {\n    ${3:// body}\n}', 'for', 'for'),
+    snip('while', 'while (${1:condition}) {\n    ${2:// body}\n}', 'while', 'while'),
+    snip('printf', 'printf("${1:%s}\\n", ${2:args});', 'printf', 'printf'),
+    snip('scanf', 'scanf("${1:%d}", &${2:var});', 'scanf', 'scanf'),
+    snip('struct', 'typedef struct ${1:Name} {\n    ${2:// fields}\n} ${1:Name};', 'struct', 'struct'),
+  ],
+  csharp: [
+    snip('cw', 'Console.WriteLine(${1:value});', 'Console.WriteLine', 'cw'),
+    snip('main', 'static void Main(string[] args)\n{\n    ${1:// body}\n}', 'Main method', 'main'),
+    snip('class', 'public class ${1:ClassName}\n{\n    ${2:// body}\n}', 'class', 'class'),
+    snip('if', 'if (${1:condition})\n{\n    ${2:// body}\n}', 'if', 'if'),
+    snip('for', 'for (int ${1:i} = 0; ${1:i} < ${2:n}; ${1:i}++)\n{\n    ${3:// body}\n}', 'for loop', 'for'),
+    snip('foreach', 'foreach (var ${1:item} in ${2:collection})\n{\n    ${3:// body}\n}', 'foreach', 'foreach'),
+    snip('try', 'try\n{\n    ${1:// body}\n}\ncatch (${2:Exception} ${3:ex})\n{\n    ${4:// handle}\n}', 'try-catch', 'try'),
+    snip('prop', 'public ${1:int} ${2:Name} { get; set; }', 'auto property', 'prop'),
+  ],
+  go: [
+    snip('main', 'package main\n\nimport "fmt"\n\nfunc main() {\n    ${1:// body}\n}', 'main', 'main'),
+    snip('func', 'func ${1:name}(${2:args}) ${3:returnType} {\n    ${4:// body}\n}', 'func', 'func'),
+    snip('struct', 'type ${1:Name} struct {\n    ${2:Field} ${3:Type}\n}', 'struct', 'struct'),
+    snip('if', 'if ${1:condition} {\n    ${2:// body}\n}', 'if', 'if'),
+    snip('iferr', 'if err != nil {\n    ${1:return err}\n}', 'if err != nil', 'iferr'),
+    snip('for', 'for ${1:i} := 0; ${1:i} < ${2:n}; ${1:i}++ {\n    ${3:// body}\n}', 'for', 'for'),
+  ],
+  rust: [
+    snip('main', 'fn main() {\n    ${1:// body}\n}', 'main', 'main'),
+    snip('fn', 'fn ${1:name}(${2:args}) ${3:-> ReturnType} {\n    ${4:// body}\n}', 'function', 'fn'),
+    snip('struct', 'struct ${1:Name} {\n    ${2:field}: ${3:Type},\n}', 'struct', 'struct'),
+    snip('impl', 'impl ${1:Type} {\n    pub fn ${2:new}(${3:args}) -> Self {\n        ${4:todo!()}\n    }\n}', 'impl', 'impl'),
+    snip('if', 'if ${1:condition} {\n    ${2:// body}\n}', 'if', 'if'),
+    snip('match', 'match ${1:expr} {\n    ${2:pattern} => ${3:// body},\n    _ => ${4:// default},\n}', 'match', 'match'),
+    snip('for', 'for ${1:item} in ${2:iter} {\n    ${3:// body}\n}', 'for', 'for'),
+  ],
+  kotlin: [
+    snip('main', 'fun main() {\n    ${1:// body}\n}', 'main', 'main'),
+    snip('fun', 'fun ${1:name}(${2:args}): ${3:Unit} {\n    ${4:// body}\n}', 'function', 'fun'),
+    snip('class', 'class ${1:Name}(${2:val field: Type}) {\n    ${3:// body}\n}', 'class', 'class'),
+    snip('if', 'if (${1:condition}) {\n    ${2:// body}\n}', 'if', 'if'),
+    snip('for', 'for (${1:item} in ${2:collection}) {\n    ${3:// body}\n}', 'for', 'for'),
+    snip('when', 'when (${1:expr}) {\n    ${2:value} -> ${3:// body}\n    else -> ${4:// default}\n}', 'when', 'when'),
+  ],
+  swift: [
+    snip('func', 'func ${1:name}(${2:args}) ${3:-> ReturnType} {\n    ${4:// body}\n}', 'function', 'func'),
+    snip('if', 'if ${1:condition} {\n    ${2:// body}\n}', 'if', 'if'),
+    snip('for', 'for ${1:item} in ${2:collection} {\n    ${3:// body}\n}', 'for', 'for'),
+    snip('guard', 'guard let ${1:value} = ${2:optional} else {\n    ${3:return}\n}', 'guard', 'guard'),
+  ],
+  sql: [
+    snip('select', 'SELECT ${1:*}\nFROM ${2:table_name}\nWHERE ${3:condition};', 'SELECT', 'select'),
+    snip('insert', 'INSERT INTO ${1:table_name} (${2:columns})\nVALUES (${3:values});', 'INSERT', 'insert'),
+    snip('update', 'UPDATE ${1:table_name}\nSET ${2:column} = ${3:value}\nWHERE ${4:condition};', 'UPDATE', 'update'),
+    snip('delete', 'DELETE FROM ${1:table_name}\nWHERE ${2:condition};', 'DELETE', 'delete'),
+    snip('create', 'CREATE TABLE ${1:table_name} (\n    ${2:id} INT PRIMARY KEY AUTO_INCREMENT,\n    ${3:column} ${4:VARCHAR(255)}\n);', 'CREATE TABLE', 'create'),
+  ],
+  ruby: [
+    snip('def', 'def ${1:method_name}(${2:args})\n  ${3:# body}\nend', 'method', 'def'),
+    snip('class', 'class ${1:ClassName}\n  def initialize(${2:args})\n    ${3:# body}\n  end\nend', 'class', 'class'),
+    snip('if', 'if ${1:condition}\n  ${2:# body}\nend', 'if', 'if'),
+  ],
+  php: [
+    snip('class', 'class ${1:ClassName} {\n    public function __construct(${2:args}) {\n        ${3:// body}\n    }\n}', 'class', 'class'),
+    snip('function', 'function ${1:name}(${2:args}): ${3:void} {\n    ${4:// body}\n}', 'function', 'function'),
+    snip('if', 'if (${1:condition}) {\n    ${2:// body}\n}', 'if', 'if'),
+    snip('foreach', 'foreach (${1:$array} as ${2:$key} => ${3:$value}) {\n    ${4:// body}\n}', 'foreach', 'foreach'),
+  ],
+};
 
 // ---------------------------------------------------------------------------
-// Standard Library Member Methods for Dot (.) Trigger
+// Static API builtins
 // ---------------------------------------------------------------------------
 
-const JAVA_MEMBERS = [
-  // Object methods
-  { label: 'toString()', insertText: 'toString()', detail: 'String toString()', doc: 'Returns a string representation of the object.', kind: 0 },
-  { label: 'equals(obj)', insertText: 'equals(${1:obj})', detail: 'boolean equals(Object obj)', doc: 'Indicates whether some other object is equal to this one.', isSnippet: true, kind: 0 },
-  { label: 'hashCode()', insertText: 'hashCode()', detail: 'int hashCode()', doc: 'Returns a hash code value for the object.', kind: 0 },
-  { label: 'getClass()', insertText: 'getClass()', detail: 'Class<?> getClass()', doc: 'Returns the runtime class of this Object.', kind: 0 },
-  { label: 'clone()', insertText: 'clone()', detail: 'Object clone()', doc: 'Creates and returns a copy of this object.', kind: 0 },
-
-  // String methods
-  { label: 'length()', insertText: 'length()', detail: 'int length()', doc: 'Returns the length of this string or collection.', kind: 0 },
-  { label: 'charAt(index)', insertText: 'charAt(${1:index})', detail: 'char charAt(int index)', doc: 'Returns the char value at the specified index.', isSnippet: true, kind: 0 },
-  { label: 'substring(begin, end)', insertText: 'substring(${1:beginIndex}, ${2:endIndex})', detail: 'String substring(int beginIndex, int endIndex)', doc: 'Returns a substring of this string.', isSnippet: true, kind: 0 },
-  { label: 'substring(begin)', insertText: 'substring(${1:beginIndex})', detail: 'String substring(int beginIndex)', doc: 'Returns a substring from beginIndex to end.', isSnippet: true, kind: 0 },
-  { label: 'contains(s)', insertText: 'contains(${1:s})', detail: 'boolean contains(CharSequence s)', doc: 'Returns true if this string contains the sequence.', isSnippet: true, kind: 0 },
-  { label: 'equals(anotherString)', insertText: 'equals(${1:anotherString})', detail: 'boolean equals(Object anObject)', doc: 'Compares this string to the specified object.', isSnippet: true, kind: 0 },
-  { label: 'equalsIgnoreCase(s)', insertText: 'equalsIgnoreCase(${1:anotherString})', detail: 'boolean equalsIgnoreCase(String anotherString)', doc: 'Compares this string ignoring case considerations.', isSnippet: true, kind: 0 },
-  { label: 'startsWith(prefix)', insertText: 'startsWith(${1:prefix})', detail: 'boolean startsWith(String prefix)', doc: 'Tests if this string starts with the specified prefix.', isSnippet: true, kind: 0 },
-  { label: 'endsWith(suffix)', insertText: 'endsWith(${1:suffix})', detail: 'boolean endsWith(String suffix)', doc: 'Tests if this string ends with the specified suffix.', isSnippet: true, kind: 0 },
-  { label: 'indexOf(str)', insertText: 'indexOf(${1:str})', detail: 'int indexOf(String str)', doc: 'Returns the index within this string of the first occurrence.', isSnippet: true, kind: 0 },
-  { label: 'lastIndexOf(str)', insertText: 'lastIndexOf(${1:str})', detail: 'int lastIndexOf(String str)', doc: 'Returns the index of the last occurrence.', isSnippet: true, kind: 0 },
-  { label: 'toLowerCase()', insertText: 'toLowerCase()', detail: 'String toLowerCase()', doc: 'Converts all characters in this String to lower case.', kind: 0 },
-  { label: 'toUpperCase()', insertText: 'toUpperCase()', detail: 'String toUpperCase()', doc: 'Converts all characters in this String to upper case.', kind: 0 },
-  { label: 'trim()', insertText: 'trim()', detail: 'String trim()', doc: 'Returns a string with leading and trailing space removed.', kind: 0 },
-  { label: 'strip()', insertText: 'strip()', detail: 'String strip()', doc: 'Returns a string with all whitespace removed.', kind: 0 },
-  { label: 'replace(old, new)', insertText: 'replace(${1:oldChar}, ${2:newChar})', detail: 'String replace(CharSequence target, CharSequence replacement)', doc: 'Replaces each substring matching target with replacement.', isSnippet: true, kind: 0 },
-  { label: 'replaceAll(regex, rep)', insertText: 'replaceAll(${1:regex}, ${2:replacement})', detail: 'String replaceAll(String regex, String replacement)', doc: 'Replaces each substring matching regex with replacement.', isSnippet: true, kind: 0 },
-  { label: 'split(regex)', insertText: 'split("${1:regex}")', detail: 'String[] split(String regex)', doc: 'Splits this string around matches of the given regular expression.', isSnippet: true, kind: 0 },
-  { label: 'toCharArray()', insertText: 'toCharArray()', detail: 'char[] toCharArray()', doc: 'Converts this string to a new character array.', kind: 0 },
-  { label: 'getBytes()', insertText: 'getBytes()', detail: 'byte[] getBytes()', doc: 'Encodes this String into a sequence of bytes.', kind: 0 },
-  { label: 'isEmpty()', insertText: 'isEmpty()', detail: 'boolean isEmpty()', doc: 'Returns true if length() is 0.', kind: 0 },
-  { label: 'isBlank()', insertText: 'isBlank()', detail: 'boolean isBlank()', doc: 'Returns true if the string is empty or contains only whitespace.', kind: 0 },
-  { label: 'compareTo(another)', insertText: 'compareTo(${1:anotherString})', detail: 'int compareTo(String anotherString)', doc: 'Compares two strings lexicographically.', isSnippet: true, kind: 0 },
-
-  // List / Collection / Set methods
-  { label: 'size()', insertText: 'size()', detail: 'int size()', doc: 'Returns the number of elements in this collection or map.', kind: 0 },
-  { label: 'add(e)', insertText: 'add(${1:element})', detail: 'boolean add(E e)', doc: 'Ensures that this collection contains the specified element.', isSnippet: true, kind: 0 },
-  { label: 'addAll(c)', insertText: 'addAll(${1:collection})', detail: 'boolean addAll(Collection<? extends E> c)', doc: 'Appends all elements in the specified collection.', isSnippet: true, kind: 0 },
-  { label: 'get(index)', insertText: 'get(${1:index})', detail: 'E get(int index)', doc: 'Returns the element at the specified position in this list.', isSnippet: true, kind: 0 },
-  { label: 'set(index, element)', insertText: 'set(${1:index}, ${2:element})', detail: 'E set(int index, E element)', doc: 'Replaces the element at the specified position.', isSnippet: true, kind: 0 },
-  { label: 'remove(o)', insertText: 'remove(${1:o})', detail: 'boolean remove(Object o)', doc: 'Removes the first occurrence of the specified element.', isSnippet: true, kind: 0 },
-  { label: 'clear()', insertText: 'clear()', detail: 'void clear()', doc: 'Removes all elements from this collection or map.', kind: 0 },
-  { label: 'iterator()', insertText: 'iterator()', detail: 'Iterator<E> iterator()', doc: 'Returns an iterator over elements.', kind: 0 },
-  { label: 'toArray()', insertText: 'toArray()', detail: 'Object[] toArray()', doc: 'Returns an array containing all elements in this collection.', kind: 0 },
-  { label: 'stream()', insertText: 'stream()', detail: 'Stream<E> stream()', doc: 'Returns a sequential Stream with this collection as its source.', kind: 0 },
-  { label: 'forEach(action)', insertText: 'forEach(${1:action})', detail: 'void forEach(Consumer<? super T> action)', doc: 'Performs the given action for each element.', isSnippet: true, kind: 0 },
-  { label: 'sort(comparator)', insertText: 'sort(${1:comparator})', detail: 'void sort(Comparator<? super E> c)', doc: 'Sorts this list according to Comparator.', isSnippet: true, kind: 0 },
-
-  // Map methods
-  { label: 'get(key)', insertText: 'get(${1:key})', detail: 'V get(Object key)', doc: 'Returns the value to which specified key is mapped.', isSnippet: true, kind: 0 },
-  { label: 'getOrDefault(key, defaultVal)', insertText: 'getOrDefault(${1:key}, ${2:defaultValue})', detail: 'V getOrDefault(Object key, V defaultValue)', doc: 'Returns mapped value, or defaultValue if not present.', isSnippet: true, kind: 0 },
-  { label: 'put(key, value)', insertText: 'put(${1:key}, ${2:value})', detail: 'V put(K key, V value)', doc: 'Associates specified value with specified key.', isSnippet: true, kind: 0 },
-  { label: 'putIfAbsent(key, value)', insertText: 'putIfAbsent(${1:key}, ${2:value})', detail: 'V putIfAbsent(K key, V value)', doc: 'Associates key with value if key is not already mapped.', isSnippet: true, kind: 0 },
-  { label: 'containsKey(key)', insertText: 'containsKey(${1:key})', detail: 'boolean containsKey(Object key)', doc: 'Returns true if map contains key.', isSnippet: true, kind: 0 },
-  { label: 'containsValue(value)', insertText: 'containsValue(${1:value})', detail: 'boolean containsValue(Object value)', doc: 'Returns true if map maps one or more keys to value.', isSnippet: true, kind: 0 },
-  { label: 'keySet()', insertText: 'keySet()', detail: 'Set<K> keySet()', doc: 'Returns a Set view of keys.', kind: 0 },
-  { label: 'values()', insertText: 'values()', detail: 'Collection<V> values()', doc: 'Returns a Collection view of values.', kind: 0 },
-  { label: 'entrySet()', insertText: 'entrySet()', detail: 'Set<Map.Entry<K, V>> entrySet()', doc: 'Returns a Set view of mappings.', kind: 0 },
-
-  // Stream methods
-  { label: 'filter(predicate)', insertText: 'filter(${1:x -> predicate})', detail: 'Stream<T> filter(Predicate<? super T> predicate)', doc: 'Returns a stream consisting of elements matching predicate.', isSnippet: true, kind: 0 },
-  { label: 'map(mapper)', insertText: 'map(${1:x -> mapper})', detail: '<R> Stream<R> map(Function<? super T, ? extends R> mapper)', doc: 'Returns a stream consisting of results of applying mapper.', isSnippet: true, kind: 0 },
-  { label: 'collect(collector)', insertText: 'collect(${1:Collectors.toList()})', detail: '<R, A> R collect(Collector<? super T, A, R> collector)', doc: 'Performs a mutable reduction operation on elements.', isSnippet: true, kind: 0 },
-  { label: 'count()', insertText: 'count()', detail: 'long count()', doc: 'Returns count of elements in stream.', kind: 0 },
-
-  // Array field
-  { label: 'length', insertText: 'length', detail: 'int length (array)', doc: 'The length of the array.', kind: 3 },
-];
-
-const PYTHON_MEMBERS = [
-  { label: 'append(x)', insertText: 'append(${1:x})', detail: 'list.append(x)', doc: 'Add an item to the end of the list.', isSnippet: true, kind: 0 },
-  { label: 'extend(iterable)', insertText: 'extend(${1:iterable})', detail: 'list.extend(iterable)', doc: 'Extend list by appending elements from iterable.', isSnippet: true, kind: 0 },
-  { label: 'insert(i, x)', insertText: 'insert(${1:i}, ${2:x})', detail: 'list.insert(i, x)', doc: 'Insert item at given position.', isSnippet: true, kind: 0 },
-  { label: 'remove(x)', insertText: 'remove(${1:x})', detail: 'list.remove(x)', doc: 'Remove first item whose value is equal to x.', isSnippet: true, kind: 0 },
-  { label: 'pop(i)', insertText: 'pop(${1:index})', detail: 'list.pop([i])', doc: 'Remove item at given position in list and return it.', isSnippet: true, kind: 0 },
-  { label: 'clear()', insertText: 'clear()', detail: 'list.clear()', doc: 'Remove all items from list/dict/set.', kind: 0 },
-  { label: 'keys()', insertText: 'keys()', detail: 'dict.keys()', doc: 'Return a new view of dictionary keys.', kind: 0 },
-  { label: 'values()', insertText: 'values()', detail: 'dict.values()', doc: 'Return a new view of dictionary values.', kind: 0 },
-  { label: 'items()', insertText: 'items()', detail: 'dict.items()', doc: 'Return a new view of dictionary items (key, value).', kind: 0 },
-  { label: 'get(key, default)', insertText: 'get(${1:key}, ${2:default})', detail: 'dict.get(key[, default])', doc: 'Return value for key if in dict, else default.', isSnippet: true, kind: 0 },
-  { label: 'split(sep)', insertText: 'split(${1:sep})', detail: 'str.split(sep=None, maxsplit=-1)', doc: 'Return a list of words in string.', isSnippet: true, kind: 0 },
-  { label: 'join(iterable)', insertText: 'join(${1:iterable})', detail: 'str.join(iterable)', doc: 'Concatenate strings in iterable with separator.', isSnippet: true, kind: 0 },
-  { label: 'strip()', insertText: 'strip(${1:chars})', detail: 'str.strip([chars])', doc: 'Return copy of string with leading/trailing whitespace removed.', isSnippet: true, kind: 0 },
-  { label: 'replace(old, new)', insertText: 'replace(${1:old}, ${2:new})', detail: 'str.replace(old, new[, count])', doc: 'Return copy of string with occurrences of old replaced by new.', isSnippet: true, kind: 0 },
-  { label: 'startswith(prefix)', insertText: 'startswith(${1:prefix})', detail: 'str.startswith(prefix)', doc: 'Return True if string starts with prefix.', isSnippet: true, kind: 0 },
-  { label: 'endswith(suffix)', insertText: 'endswith(${1:suffix})', detail: 'str.endswith(suffix)', doc: 'Return True if string ends with suffix.', isSnippet: true, kind: 0 },
-  { label: 'lower()', insertText: 'lower()', detail: 'str.lower()', doc: 'Return copy of string converted to lowercase.', kind: 0 },
-  { label: 'upper()', insertText: 'upper()', detail: 'str.upper()', doc: 'Return copy of string converted to uppercase.', kind: 0 },
-];
-
-const CPP_MEMBERS = [
-  { label: 'size()', insertText: 'size()', detail: 'size_t size() const', doc: 'Returns the number of elements in the container.', kind: 0 },
-  { label: 'empty()', insertText: 'empty()', detail: 'bool empty() const', doc: 'Checks whether container is empty.', kind: 0 },
-  { label: 'clear()', insertText: 'clear()', detail: 'void clear()', doc: 'Clears contents of container.', kind: 0 },
-  { label: 'begin()', insertText: 'begin()', detail: 'iterator begin()', doc: 'Returns iterator to beginning.', kind: 0 },
-  { label: 'end()', insertText: 'end()', detail: 'iterator end()', doc: 'Returns iterator to end.', kind: 0 },
-  { label: 'push_back(val)', insertText: 'push_back(${1:val})', detail: 'void push_back(const T& value)', doc: 'Appends element to end.', isSnippet: true, kind: 0 },
-  { label: 'emplace_back(args)', insertText: 'emplace_back(${1:args})', detail: 'void emplace_back(Args&&... args)', doc: 'Constructs element in-place at end.', isSnippet: true, kind: 0 },
-  { label: 'pop_back()', insertText: 'pop_back()', detail: 'void pop_back()', doc: 'Removes last element.', kind: 0 },
-  { label: 'length()', insertText: 'length()', detail: 'size_t length() const', doc: 'Returns number of characters in string.', kind: 0 },
-  { label: 'c_str()', insertText: 'c_str()', detail: 'const char* c_str() const', doc: 'Returns pointer to null-terminated char array.', kind: 0 },
-];
+const BUILTINS = {
+  java: [
+    api('System.out.println', 'System.out.println(${1:value});', 'print line to stdout', true),
+    api('System.out.print', 'System.out.print(${1:value});', 'print to stdout', true),
+    api('System.out.printf', 'System.out.printf("${1:%s}%n", ${2:args});', 'printf', true),
+    api('System.err.println', 'System.err.println(${1:value});', 'print line to stderr', true),
+    api('String.format', 'String.format("${1:%s}", ${2:args})', 'format string', true),
+    api('Math.max', 'Math.max(${1:a}, ${2:b})', 'Math.max(a,b)', true),
+    api('Math.min', 'Math.min(${1:a}, ${2:b})', 'Math.min(a,b)', true),
+    api('Math.abs', 'Math.abs(${1:x})', 'Math.abs(x)', true),
+    api('Math.sqrt', 'Math.sqrt(${1:x})', 'Math.sqrt(x)', true),
+    api('Math.pow', 'Math.pow(${1:base}, ${2:exp})', 'Math.pow(base, exp)', true),
+    api('Math.floor', 'Math.floor(${1:x})', 'Math.floor(x)', true),
+    api('Math.ceil', 'Math.ceil(${1:x})', 'Math.ceil(x)', true),
+    api('Math.round', 'Math.round(${1:x})', 'Math.round(x)', true),
+    api('Math.random', 'Math.random()', 'Math.random() → [0,1)', false),
+    api('Integer.parseInt', 'Integer.parseInt(${1:s})', 'parse int from string', true),
+    api('Integer.toString', 'Integer.toString(${1:i})', 'int to string', true),
+    api('Double.parseDouble', 'Double.parseDouble(${1:s})', 'parse double from string', true),
+    api('String.valueOf', 'String.valueOf(${1:x})', 'convert to String', true),
+    api('Arrays.sort', 'Arrays.sort(${1:array})', 'sort array', true),
+    api('Arrays.asList', 'Arrays.asList(${1:elements})', 'array to List', true),
+    api('Arrays.toString', 'Arrays.toString(${1:array})', 'array to string', true),
+    api('Collections.sort', 'Collections.sort(${1:list})', 'sort list', true),
+    api('Collections.reverse', 'Collections.reverse(${1:list})', 'reverse list', true),
+    api('Collections.unmodifiableList', 'Collections.unmodifiableList(${1:list})', 'unmodifiable list', true),
+    api('new ArrayList', 'new ArrayList<${1:Type}>()', 'create ArrayList', true),
+    api('new LinkedList', 'new LinkedList<${1:Type}>()', 'create LinkedList', true),
+    api('new HashMap', 'new HashMap<${1:K}, ${2:V}>()', 'create HashMap', true),
+    api('new HashSet', 'new HashSet<${1:Type}>()', 'create HashSet', true),
+    api('new Scanner', 'new Scanner(System.in)', 'create Scanner for stdin', false),
+    api('new StringBuilder', 'new StringBuilder()', 'create StringBuilder', false),
+  ],
+  python: [
+    api('print', 'print(${1:value})', 'print to stdout', true),
+    api('len', 'len(${1:obj})', 'len(s) → int', true),
+    api('range', 'range(${1:stop})', 'range(stop) or range(start, stop[, step])', true),
+    api('type', 'type(${1:obj})', 'type(object) → type', true),
+    api('isinstance', 'isinstance(${1:obj}, ${2:classinfo})', 'isinstance', true),
+    api('enumerate', 'enumerate(${1:iterable})', 'enumerate', true),
+    api('zip', 'zip(${1:iter1}, ${2:iter2})', 'zip iterables', true),
+    api('map', 'map(${1:func}, ${2:iterable})', 'map', true),
+    api('filter', 'filter(${1:func}, ${2:iterable})', 'filter', true),
+    api('sorted', 'sorted(${1:iterable})', 'sorted', true),
+    api('reversed', 'reversed(${1:seq})', 'reversed', true),
+    api('list', 'list(${1:iterable})', 'list(iterable)', true),
+    api('dict', 'dict()', 'dict()', false),
+    api('set', 'set(${1:iterable})', 'set(iterable)', true),
+    api('tuple', 'tuple(${1:iterable})', 'tuple(iterable)', true),
+    api('int', 'int(${1:x})', 'int(x)', true),
+    api('str', 'str(${1:obj})', 'str(object)', true),
+    api('float', 'float(${1:x})', 'float(x)', true),
+    api('bool', 'bool(${1:x})', 'bool(x)', true),
+    api('input', 'input(${1:"prompt: "})', 'read string from stdin', true),
+    api('open', 'open(${1:"file"}, ${2:"r"})', 'open file', true),
+    api('abs', 'abs(${1:x})', 'absolute value', true),
+    api('max', 'max(${1:iterable})', 'maximum value', true),
+    api('min', 'min(${1:iterable})', 'minimum value', true),
+    api('sum', 'sum(${1:iterable})', 'sum of iterable', true),
+    api('any', 'any(${1:iterable})', 'any true', true),
+    api('all', 'all(${1:iterable})', 'all true', true),
+    api('hasattr', 'hasattr(${1:obj}, ${2:"name"})', 'has attribute', true),
+    api('getattr', 'getattr(${1:obj}, ${2:"name"})', 'get attribute', true),
+  ],
+  cpp: [
+    api('cout', 'cout << ${1:value} << endl;', 'print to stdout', true),
+    api('cerr', 'cerr << ${1:msg} << endl;', 'print to stderr', true),
+    api('cin', 'cin >> ${1:variable};', 'read from stdin', true),
+    api('std::cout', 'std::cout << ${1:value} << std::endl;', 'std::cout', true),
+    api('std::cin', 'std::cin >> ${1:variable};', 'std::cin', true),
+    api('std::string', 'std::string', 'string type', false),
+    api('std::vector', 'std::vector<${1:T}>', 'vector', true),
+    api('std::map', 'std::map<${1:K}, ${2:V}>', 'map', true),
+    api('std::sort', 'std::sort(${1:begin}, ${2:end})', 'sort range', true),
+    api('std::find', 'std::find(${1:begin}, ${2:end}, ${3:val})', 'find in range', true),
+  ],
+};
 
 // ---------------------------------------------------------------------------
-// Dynamic Symbol Extractor (Variables, Methods, Classes from Document)
+// Member access suggestions (triggered by ".")
 // ---------------------------------------------------------------------------
 
-function extractDocumentSymbols(code, language, monaco) {
-  const kinds = monaco.languages.CompletionItemKind;
-  const symbols = [];
-  const seen = new Set();
+const MEMBERS = {
+  java: [
+    // String
+    { label: 'length()', insert: 'length()', detail: 'int length()' },
+    { label: 'charAt(i)', insert: 'charAt(${1:i})', detail: 'char charAt(int i)', snip: true },
+    { label: 'substring(begin)', insert: 'substring(${1:begin})', detail: 'String substring(int begin)', snip: true },
+    { label: 'substring(begin, end)', insert: 'substring(${1:begin}, ${2:end})', detail: 'String substring(int begin, int end)', snip: true },
+    { label: 'contains(s)', insert: 'contains(${1:s})', detail: 'boolean contains(CharSequence s)', snip: true },
+    { label: 'equals(obj)', insert: 'equals(${1:obj})', detail: 'boolean equals(Object obj)', snip: true },
+    { label: 'equalsIgnoreCase(s)', insert: 'equalsIgnoreCase(${1:s})', detail: 'boolean equalsIgnoreCase(String s)', snip: true },
+    { label: 'startsWith(prefix)', insert: 'startsWith(${1:prefix})', detail: 'boolean startsWith(String prefix)', snip: true },
+    { label: 'endsWith(suffix)', insert: 'endsWith(${1:suffix})', detail: 'boolean endsWith(String suffix)', snip: true },
+    { label: 'indexOf(str)', insert: 'indexOf(${1:str})', detail: 'int indexOf(String str)', snip: true },
+    { label: 'lastIndexOf(str)', insert: 'lastIndexOf(${1:str})', detail: 'int lastIndexOf(String str)', snip: true },
+    { label: 'replace(old, new)', insert: 'replace(${1:old}, ${2:new})', detail: 'String replace(CharSequence old, CharSequence new)', snip: true },
+    { label: 'replaceAll(regex, r)', insert: 'replaceAll(${1:regex}, ${2:replacement})', detail: 'String replaceAll(String regex, String replacement)', snip: true },
+    { label: 'split(regex)', insert: 'split(${1:regex})', detail: 'String[] split(String regex)', snip: true },
+    { label: 'trim()', insert: 'trim()', detail: 'String trim()' },
+    { label: 'strip()', insert: 'strip()', detail: 'String strip()' },
+    { label: 'toLowerCase()', insert: 'toLowerCase()', detail: 'String toLowerCase()' },
+    { label: 'toUpperCase()', insert: 'toUpperCase()', detail: 'String toUpperCase()' },
+    { label: 'isEmpty()', insert: 'isEmpty()', detail: 'boolean isEmpty()' },
+    { label: 'isBlank()', insert: 'isBlank()', detail: 'boolean isBlank()' },
+    { label: 'compareTo(s)', insert: 'compareTo(${1:s})', detail: 'int compareTo(String s)', snip: true },
+    { label: 'toCharArray()', insert: 'toCharArray()', detail: 'char[] toCharArray()' },
+    { label: 'intern()', insert: 'intern()', detail: 'String intern()' },
+    { label: 'toString()', insert: 'toString()', detail: 'String toString()' },
+    // List / Collection
+    { label: 'size()', insert: 'size()', detail: 'int size()' },
+    { label: 'isEmpty()', insert: 'isEmpty()', detail: 'boolean isEmpty()' },
+    { label: 'add(e)', insert: 'add(${1:element})', detail: 'boolean add(E e)', snip: true },
+    { label: 'add(i, e)', insert: 'add(${1:index}, ${2:element})', detail: 'void add(int index, E element)', snip: true },
+    { label: 'addAll(c)', insert: 'addAll(${1:collection})', detail: 'boolean addAll(Collection<? extends E> c)', snip: true },
+    { label: 'get(index)', insert: 'get(${1:index})', detail: 'E get(int index)', snip: true },
+    { label: 'set(i, e)', insert: 'set(${1:index}, ${2:element})', detail: 'E set(int index, E element)', snip: true },
+    { label: 'remove(o)', insert: 'remove(${1:o})', detail: 'boolean remove(Object o)', snip: true },
+    { label: 'remove(index)', insert: 'remove(${1:index})', detail: 'E remove(int index)', snip: true },
+    { label: 'contains(o)', insert: 'contains(${1:o})', detail: 'boolean contains(Object o)', snip: true },
+    { label: 'clear()', insert: 'clear()', detail: 'void clear()' },
+    { label: 'sort(c)', insert: 'sort(${1:comparator})', detail: 'void sort(Comparator<? super E> c)', snip: true },
+    { label: 'toArray()', insert: 'toArray()', detail: 'Object[] toArray()' },
+    { label: 'iterator()', insert: 'iterator()', detail: 'Iterator<E> iterator()' },
+    { label: 'stream()', insert: 'stream()', detail: 'Stream<E> stream()' },
+    { label: 'forEach(action)', insert: 'forEach(${1:e -> })', detail: 'void forEach(Consumer<? super T> action)', snip: true },
+    { label: 'subList(from, to)', insert: 'subList(${1:from}, ${2:to})', detail: 'List<E> subList(int fromIndex, int toIndex)', snip: true },
+    // Map
+    { label: 'put(k, v)', insert: 'put(${1:key}, ${2:value})', detail: 'V put(K key, V value)', snip: true },
+    { label: 'get(key)', insert: 'get(${1:key})', detail: 'V get(Object key)', snip: true },
+    { label: 'getOrDefault(k, def)', insert: 'getOrDefault(${1:key}, ${2:defaultValue})', detail: 'V getOrDefault(Object key, V defaultValue)', snip: true },
+    { label: 'containsKey(key)', insert: 'containsKey(${1:key})', detail: 'boolean containsKey(Object key)', snip: true },
+    { label: 'containsValue(v)', insert: 'containsValue(${1:value})', detail: 'boolean containsValue(Object value)', snip: true },
+    { label: 'remove(key)', insert: 'remove(${1:key})', detail: 'V remove(Object key)', snip: true },
+    { label: 'keySet()', insert: 'keySet()', detail: 'Set<K> keySet()' },
+    { label: 'values()', insert: 'values()', detail: 'Collection<V> values()' },
+    { label: 'entrySet()', insert: 'entrySet()', detail: 'Set<Map.Entry<K,V>> entrySet()' },
+    { label: 'putIfAbsent(k, v)', insert: 'putIfAbsent(${1:key}, ${2:value})', detail: 'V putIfAbsent(K key, V value)', snip: true },
+    // Stream
+    { label: 'filter(p)', insert: 'filter(${1:e -> condition})', detail: 'Stream<T> filter(Predicate<? super T> p)', snip: true },
+    { label: 'map(f)', insert: 'map(${1:e -> expr})', detail: 'Stream<R> map(Function<? super T, ? extends R> f)', snip: true },
+    { label: 'collect(c)', insert: 'collect(${1:Collectors.toList()})', detail: 'R collect(Collector<? super T,A,R> c)', snip: true },
+    { label: 'count()', insert: 'count()', detail: 'long count()' },
+    { label: 'distinct()', insert: 'distinct()', detail: 'Stream<T> distinct()' },
+    { label: 'sorted()', insert: 'sorted()', detail: 'Stream<T> sorted()' },
+    { label: 'findFirst()', insert: 'findFirst()', detail: 'Optional<T> findFirst()' },
+    { label: 'findAny()', insert: 'findAny()', detail: 'Optional<T> findAny()' },
+    { label: 'toList()', insert: 'toList()', detail: 'List<T> toList() (Java 16+)' },
+    // Object / general
+    { label: 'hashCode()', insert: 'hashCode()', detail: 'int hashCode()' },
+    { label: 'getClass()', insert: 'getClass()', detail: 'Class<?> getClass()' },
+    // Array
+    { label: 'length', insert: 'length', detail: 'int length (array field)', kind: 'field' },
+  ],
+  python: [
+    { label: 'append(x)', insert: 'append(${1:x})', detail: 'list.append(x)', snip: true },
+    { label: 'extend(it)', insert: 'extend(${1:iterable})', detail: 'list.extend(iterable)', snip: true },
+    { label: 'insert(i, x)', insert: 'insert(${1:i}, ${2:x})', detail: 'list.insert(i, x)', snip: true },
+    { label: 'remove(x)', insert: 'remove(${1:x})', detail: 'list.remove(x)', snip: true },
+    { label: 'pop()', insert: 'pop(${1:index})', detail: 'list.pop([i])', snip: true },
+    { label: 'sort()', insert: 'sort(key=${1:None}, reverse=${2:False})', detail: 'list.sort()', snip: true },
+    { label: 'reverse()', insert: 'reverse()', detail: 'list.reverse()' },
+    { label: 'index(x)', insert: 'index(${1:x})', detail: 'list.index(x)', snip: true },
+    { label: 'count(x)', insert: 'count(${1:x})', detail: 'list.count(x)', snip: true },
+    { label: 'clear()', insert: 'clear()', detail: 'list.clear()' },
+    { label: 'copy()', insert: 'copy()', detail: 'list.copy()' },
+    { label: 'keys()', insert: 'keys()', detail: 'dict.keys()' },
+    { label: 'values()', insert: 'values()', detail: 'dict.values()' },
+    { label: 'items()', insert: 'items()', detail: 'dict.items()' },
+    { label: 'get(key, default)', insert: 'get(${1:key}, ${2:None})', detail: 'dict.get(key[, default])', snip: true },
+    { label: 'update(d)', insert: 'update(${1:dict})', detail: 'dict.update([other])', snip: true },
+    { label: 'split(sep)', insert: 'split(${1:sep})', detail: 'str.split(sep=None)', snip: true },
+    { label: 'join(it)', insert: 'join(${1:iterable})', detail: 'str.join(iterable)', snip: true },
+    { label: 'strip()', insert: 'strip()', detail: 'str.strip([chars])' },
+    { label: 'replace(old, new)', insert: 'replace(${1:old}, ${2:new})', detail: 'str.replace(old, new)', snip: true },
+    { label: 'lower()', insert: 'lower()', detail: 'str.lower()' },
+    { label: 'upper()', insert: 'upper()', detail: 'str.upper()' },
+    { label: 'startswith(p)', insert: 'startswith(${1:prefix})', detail: 'str.startswith(prefix)', snip: true },
+    { label: 'endswith(s)', insert: 'endswith(${1:suffix})', detail: 'str.endswith(suffix)', snip: true },
+    { label: 'format(*args)', insert: 'format(${1:args})', detail: 'str.format(*args, **kwargs)', snip: true },
+    { label: 'find(sub)', insert: 'find(${1:sub})', detail: 'str.find(sub)', snip: true },
+    { label: 'isdigit()', insert: 'isdigit()', detail: 'str.isdigit()' },
+    { label: 'isalpha()', insert: 'isalpha()', detail: 'str.isalpha()' },
+    { label: 'isalnum()', insert: 'isalnum()', detail: 'str.isalnum()' },
+  ],
+  cpp: [
+    { label: 'size()', insert: 'size()', detail: 'size_t size() const' },
+    { label: 'empty()', insert: 'empty()', detail: 'bool empty() const' },
+    { label: 'clear()', insert: 'clear()', detail: 'void clear()' },
+    { label: 'begin()', insert: 'begin()', detail: 'iterator begin()' },
+    { label: 'end()', insert: 'end()', detail: 'iterator end()' },
+    { label: 'push_back(v)', insert: 'push_back(${1:val})', detail: 'void push_back(const T& val)', snip: true },
+    { label: 'emplace_back(args)', insert: 'emplace_back(${1:args})', detail: 'void emplace_back(Args&&... args)', snip: true },
+    { label: 'pop_back()', insert: 'pop_back()', detail: 'void pop_back()' },
+    { label: 'front()', insert: 'front()', detail: 'reference front()' },
+    { label: 'back()', insert: 'back()', detail: 'reference back()' },
+    { label: 'find(key)', insert: 'find(${1:key})', detail: 'iterator find(const Key& key)', snip: true },
+    { label: 'length()', insert: 'length()', detail: 'size_t length() const' },
+    { label: 'substr(pos, n)', insert: 'substr(${1:pos}, ${2:n})', detail: 'string substr(size_t pos, size_t n)', snip: true },
+    { label: 'c_str()', insert: 'c_str()', detail: 'const char* c_str() const' },
+  ],
+};
 
-  function add(label, kind, detail, insertText = label, isSnippet = false, doc = '', sortOrder = '00') {
-    if (!label || label.length < 1 || seen.has(label)) return;
-    seen.add(label);
+MEMBERS.c = MEMBERS.cpp;
+MEMBERS.csharp = MEMBERS.java;
+MEMBERS.kotlin = MEMBERS.java;
 
-    const item = {
-      label,
-      kind,
-      detail: detail || '',
-      insertText,
-      sortText: `${sortOrder}_${label}`,
-      filterText: label,
-    };
-    if (isSnippet) item.insertTextRules = 4;
-    if (doc) item.documentation = { value: doc };
-    symbols.push(item);
+// ---------------------------------------------------------------------------
+// Word-based completions from the document (the main VS Code-like feature)
+// ---------------------------------------------------------------------------
+
+function getWordSuggestions(model, language, currentWord, kinds) {
+  const code = model.getValue();
+  const keywordSet = KEYWORD_SETS[language] || new Set();
+  const wordSet = new Set();
+  const wordPattern = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+  let m;
+  while ((m = wordPattern.exec(code)) !== null) {
+    const w = m[0];
+    if (w.length > 1 && w !== currentWord && !keywordSet.has(w)) {
+      wordSet.add(w);
+    }
   }
-
-  // --- JAVA / C# / KOTLIN / C++ / C ---
-  if (['java', 'csharp', 'kotlin', 'cpp', 'c'].includes(language)) {
-    // 1. Classes, Interfaces, Enums, Records, Structs
-    const classRegex = /\b(?:public|private|protected|static|final|abstract|sealed|open|data|\s)*\b(class|interface|enum|record|struct)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g;
-    let match;
-    while ((match = classRegex.exec(code)) !== null) {
-      const type = match[1];
-      const name = match[2];
-      const kind = type === 'interface' ? (kinds.Interface || 7) : type === 'enum' ? (kinds.Enum || 12) : (kinds.Class || 6);
-
-      // Add Class Identifier
-      add(name, kind, `(${type}) ${name}`, name, false, `**Declared ${type}:** \`${name}\``, '00');
-
-      // Also add Class Constructor `ClassName()`
-      if (type === 'class' || type === 'record' || type === 'struct') {
-        add(`${name}()`, kinds.Constructor || 2, `new ${name}()`, `${name}(\${1:})`, true, `**Constructor:** \`new ${name}()\``, '00');
-      }
-    }
-
-    // 2. Methods and Functions
-    const methodRegex = /(?:public|protected|private|static|final|synchronized|abstract|default|inline|virtual|override|fun|\s)+\s+([A-Za-z0-9_$<>\[\], ?]+)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^)]*)\)\s*(?:\{|;|->|=)/g;
-    while ((match = methodRegex.exec(code)) !== null) {
-      const retType = match[1].trim();
-      const methodName = match[2];
-      const params = match[3].trim();
-      if (['if', 'for', 'while', 'switch', 'catch', 'synchronized', 'return', 'else', 'class', 'struct', 'interface', 'enum'].includes(methodName)) continue;
-
-      const paramList = params ? params.split(',').map(p => p.trim()).filter(Boolean) : [];
-      let snippetInsert = methodName + '()';
-      if (paramList.length > 0) {
-        const placeholders = paramList.map((p, idx) => {
-          const parts = p.split(/\s+/);
-          const pName = parts[parts.length - 1].replace(/[^A-Za-z0-9_$]/g, '');
-          return `\${${idx + 1}:${pName || 'arg'}}`;
-        }).join(', ');
-        snippetInsert = `${methodName}(${placeholders})`;
-      }
-
-      add(
-        methodName,
-        kinds.Method || 0,
-        `(${retType}) ${methodName}(${params})`,
-        snippetInsert,
-        paramList.length > 0,
-        `**Method:** \`${retType} ${methodName}(${params})\``,
-        '01'
-      );
-
-      // Extract parameter names as local variables in scope
-      for (const p of paramList) {
-        const pParts = p.split(/\s+/);
-        const pName = pParts[pParts.length - 1].replace(/[^A-Za-z0-9_$]/g, '');
-        const pType = pParts.slice(0, pParts.length - 1).join(' ') || 'param';
-        if (pName && !seen.has(pName)) {
-          add(pName, kinds.Variable || 5, `(parameter) ${pType} ${pName}`, pName, false, `**Parameter:** \`${pType} ${pName}\``, '00');
-        }
-      }
-    }
-
-    // 3. Variables & Fields
-    const varRegex = /(?:(?:public|protected|private|static|final|volatile|transient|val|var|const|auto|let)\s+)*(?:var|val|int|double|float|long|short|byte|char|boolean|String|auto|let|const|[A-Z][A-Za-z0-9_$<>, ?\[\]]*)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:=|;|,|\)|\()/g;
-    while ((match = varRegex.exec(code)) !== null) {
-      const varName = match[1];
-      if (['class', 'interface', 'enum', 'record', 'struct', 'new', 'return', 'if', 'else', 'for', 'while', 'try', 'catch', 'throw', 'public', 'private', 'protected', 'static', 'void', 'this', 'super', 'true', 'false', 'null', 'Main'].includes(varName)) continue;
-      add(varName, kinds.Field || 4, `(variable) ${varName}`, varName, false, `**Variable/Field:** \`${varName}\``, '00');
-    }
-  }
-
-  // --- PYTHON ---
-  if (language === 'python') {
-    const pyClassRegex = /\bclass\s+([A-Za-z_][A-Za-z0-9_]*)(?:\(([^)]*)\))?:/g;
-    let match;
-    while ((match = pyClassRegex.exec(code)) !== null) {
-      add(match[1], kinds.Class || 6, `(class) ${match[1]}`, match[1], false, `**Class:** \`${match[1]}\``, '00');
-      add(`${match[1]}()`, kinds.Constructor || 2, `${match[1]}()`, `${match[1]}(\${1:})`, true, `**Constructor:** \`${match[1]}()\``, '00');
-    }
-
-    const pyDefRegex = /\bdef\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)(?:\s*->\s*([^:]+))?:/g;
-    while ((match = pyDefRegex.exec(code)) !== null) {
-      const fnName = match[1];
-      const params = match[2].trim();
-      const retType = match[3] ? match[3].trim() : '';
-
-      const paramList = params.split(',').map(p => p.trim()).filter(p => p && p !== 'self' && p !== 'cls');
-      let snippetInsert = fnName + '()';
-      if (paramList.length > 0) {
-        const placeholders = paramList.map((p, idx) => {
-          const pName = p.split(':')[0].split('=')[0].trim();
-          return `\${${idx + 1}:${pName}}`;
-        }).join(', ');
-        snippetInsert = `${fnName}(${placeholders})`;
-      }
-
-      add(
-        fnName,
-        kinds.Function || 1,
-        `def ${fnName}(${params})${retType ? ' -> ' + retType : ''}`,
-        snippetInsert,
-        paramList.length > 0,
-        `**Function:** \`def ${fnName}(${params})\``,
-        '01'
-      );
-
-      for (const p of paramList) {
-        const pName = p.split(':')[0].split('=')[0].trim();
-        if (pName && /^[A-Za-z_][A-Za-z0-9_]*$/.test(pName)) {
-          add(pName, kinds.Variable || 5, `(parameter) ${pName}`, pName, false, '', '00');
-        }
-      }
-    }
-
-    const pyVarRegex = /(?:self\.)?([A-Za-z_][A-Za-z0-9_]*)\s*=/g;
-    while ((match = pyVarRegex.exec(code)) !== null) {
-      const varName = match[1];
-      if (['if', 'elif', 'else', 'for', 'while', 'def', 'class', 'import', 'from', 'return', 'pass', 'try', 'except', 'with', 'as', 'lambda'].includes(varName)) continue;
-      add(varName, kinds.Variable || 5, `(variable) ${varName}`, varName, false, '', '00');
-    }
-  }
-
-  // --- GO ---
-  if (language === 'go') {
-    const goTypeRegex = /\btype\s+([A-Za-z_][A-Za-z0-9_]*)\s+(struct|interface)/g;
-    let match;
-    while ((match = goTypeRegex.exec(code)) !== null) {
-      add(match[1], kinds.Class || 6, `(type) ${match[1]} ${match[2]}`, match[1], false, '', '00');
-    }
-    const goFuncRegex = /\bfunc\s+(?:\([^)]+\)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)/g;
-    while ((match = goFuncRegex.exec(code)) !== null) {
-      add(match[1], kinds.Function || 1, `func ${match[1]}(${match[2]})`, `${match[1]}()`, false, '', '01');
-    }
-    const goVarRegex = /\b(?:var|const)\s+([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*)\s*:=/g;
-    while ((match = goVarRegex.exec(code)) !== null) {
-      const name = match[1] || match[2];
-      if (name) add(name, kinds.Variable || 5, `(variable) ${name}`, name, false, '', '00');
-    }
-  }
-
-  return symbols;
+  return [...wordSet].map(w => ({
+    label: w,
+    kind: kinds.Text || 18,
+    insertText: w,
+    sortText: 'e_' + w,
+    filterText: w,
+    detail: '(identifier)',
+  }));
 }
 
 // ---------------------------------------------------------------------------
-// Language Static Definitions
-// ---------------------------------------------------------------------------
-
-const PYTHON_ITEMS = [
-  ...['False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await',
-      'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except',
-      'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
-      'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return',
-      'try', 'while', 'with', 'yield'].map(kw),
-
-  snip('def', 'def ${1:function_name}(${2:args}):\n    ${3:pass}', 'Define a function'),
-  snip('class', 'class ${1:ClassName}(${2:object}):\n    def __init__(self${3:, args}):\n        ${4:pass}', 'Define a class'),
-  snip('if', 'if ${1:condition}:\n    ${2:pass}', 'If statement'),
-  snip('ifelse', 'if ${1:condition}:\n    ${2:pass}\nelse:\n    ${3:pass}', 'If/else statement'),
-  snip('elif', 'elif ${1:condition}:\n    ${2:pass}', 'Elif branch'),
-  snip('for', 'for ${1:item} in ${2:iterable}:\n    ${3:pass}', 'For loop'),
-  snip('forrange', 'for ${1:i} in range(${2:10}):\n    ${3:pass}', 'For range loop'),
-  snip('while', 'while ${1:condition}:\n    ${2:pass}', 'While loop'),
-  snip('try', 'try:\n    ${1:pass}\nexcept ${2:Exception} as ${3:e}:\n    ${4:pass}', 'Try/except block'),
-  snip('main', 'def main():\n    ${1:pass}\n\nif __name__ == "__main__":\n    main()', 'Main guard', '', '50'),
-
-  builtin('print', 'print(${1:value})', 'print(value, ...)', 'Print to stdout.', true),
-  builtin('len', 'len(${1:obj})', 'len(s) -> int', 'Return the number of items in a container.', true),
-  builtin('range', 'range(${1:stop})', 'range(stop) or range(start, stop[, step])', '', true),
-  builtin('isinstance', 'isinstance(${1:obj}, ${2:classinfo})', 'isinstance(object, classinfo) -> bool', '', true),
-  builtin('enumerate', 'enumerate(${1:iterable})', 'enumerate(iterable, start=0)', '', true),
-  builtin('zip', 'zip(${1:iter1}, ${2:iter2})', 'zip(*iterables)', '', true),
-  builtin('sorted', 'sorted(${1:iterable})', 'sorted(iterable, *, key=None, reverse=False)', '', true),
-];
-
-const JAVA_ITEMS = [
-  ...['abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch',
-      'char', 'class', 'continue', 'default', 'do', 'double', 'else',
-      'enum', 'extends', 'final', 'finally', 'float', 'for', 'if',
-      'implements', 'import', 'instanceof', 'int', 'interface', 'long',
-      'native', 'new', 'null', 'package', 'private', 'protected', 'public',
-      'record', 'return', 'sealed', 'short', 'static', 'strictfp', 'super',
-      'switch', 'synchronized', 'this', 'throw', 'throws', 'transient',
-      'try', 'var', 'void', 'volatile', 'while', 'yield'].map(kw),
-
-  // psvm / sout / fori snippets with distinct filterText
-  snip('psvm', 'public static void main(String[] args) {\n    ${1:// body}\n}', 'public static void main(String[] args)', 'Main entry point method', '30', 'psvm'),
-  snip('sout', 'System.out.println(${1:value});', 'System.out.println(...)', 'Print line to standard output', '25', 'sout'),
-  snip('souf', 'System.out.printf("${1:%s}", ${2:args});', 'System.out.printf(...)', 'Print formatted string', '25', 'souf'),
-  snip('fori', 'for (int ${1:i} = 0; ${1:i} < ${2:n}; ${1:i}++) {\n    ${3:// body}\n}', 'Indexed for loop', '', '25', 'fori'),
-  snip('class', 'public class ${1:ClassName} {\n    ${2:// body}\n}', 'Public class definition', '', '30', 'class'),
-  snip('if', 'if (${1:condition}) {\n    ${2:// body}\n}', 'If statement', '', '30', 'if'),
-  snip('ifelse', 'if (${1:condition}) {\n    ${2:// body}\n} else {\n    ${3:// else}\n}', 'If/else', '', '30', 'ifelse'),
-  snip('for', 'for (int ${1:i} = 0; ${1:i} < ${2:n}; ${1:i}++) {\n    ${3:// body}\n}', 'For loop', '', '30', 'for'),
-  snip('foreach', 'for (${1:Type} ${2:item} : ${3:collection}) {\n    ${4:// body}\n}', 'Enhanced for loop', '', '30', 'foreach'),
-  snip('while', 'while (${1:condition}) {\n    ${2:// body}\n}', 'While loop', '', '30', 'while'),
-  snip('try', 'try {\n    ${1:// body}\n} catch (${2:Exception} ${3:e}) {\n    ${4:e.printStackTrace()}\n}', 'Try/catch', '', '30', 'try'),
-  snip('switch', 'switch (${1:expr}) {\n    case ${2:value}:\n        ${3:// body}\n        break;\n    default:\n        ${4:// default}\n}', 'Switch statement', '', '30', 'switch'),
-
-  // Builtins / common API
-  builtin('System.out.println', 'System.out.println(${1:value});', 'Print line to stdout', '', true),
-  builtin('System.out.print', 'System.out.print(${1:value});', 'Print to stdout (no newline)', '', true),
-  builtin('System.err.println', 'System.err.println(${1:value});', 'Print line to stderr', '', true),
-  builtin('String.format', 'String.format("${1:%s}", ${2:args})', 'Format a string', '', true),
-  builtin('Arrays.asList', 'Arrays.asList(${1:elements})', 'Create a fixed-size list', '', true),
-  builtin('Collections.sort', 'Collections.sort(${1:list})', 'Sort a list in-place', '', true),
-  builtin('Math.max', 'Math.max(${1:a}, ${2:b})', 'Return the larger of two values', '', true),
-  builtin('Math.min', 'Math.min(${1:a}, ${2:b})', 'Return the smaller of two values', '', true),
-  builtin('Math.abs', 'Math.abs(${1:x})', 'Return the absolute value', '', true),
-  builtin('Math.sqrt', 'Math.sqrt(${1:x})', 'Return the square root', '', true),
-  builtin('Integer.parseInt', 'Integer.parseInt(${1:s})', 'Parse an int from a string', '', true),
-  builtin('Double.parseDouble', 'Double.parseDouble(${1:s})', 'Parse a double from a string', '', true),
-];
-
-const CPP_ITEMS = [
-  ...['auto', 'bool', 'break', 'case', 'catch', 'char', 'class', 'const',
-      'constexpr', 'continue', 'default', 'delete', 'do', 'double', 'else',
-      'enum', 'explicit', 'export', 'extern', 'false', 'float', 'for',
-      'friend', 'if', 'inline', 'int', 'long', 'namespace', 'new',
-      'nullptr', 'private', 'protected', 'public', 'return', 'short',
-      'signed', 'sizeof', 'static', 'struct', 'switch', 'template', 'this',
-      'throw', 'true', 'try', 'typedef', 'typename', 'union', 'unsigned',
-      'using', 'virtual', 'void', 'volatile', 'while'].map(kw),
-
-  snip('main', '#include <iostream>\n\nint main() {\n    ${1:// body}\n    return 0;\n}', 'Main function', '', '50', 'main'),
-  snip('class', 'class ${1:ClassName} {\npublic:\n    ${1:ClassName}() = default;\n    ~${1:ClassName}() = default;\n\n    ${2:// members}\n};', 'Class definition', '', '30', 'class'),
-  snip('struct', 'struct ${1:Name} {\n    ${2:// fields}\n};', 'Struct definition', '', '30', 'struct'),
-  snip('for', 'for (int ${1:i} = 0; ${1:i} < ${2:n}; ++${1:i}) {\n    ${3:// body}\n}', 'For loop', '', '30', 'for'),
-  snip('cout', 'std::cout << ${1:value} << "\\n";', 'std::cout print', '', '25', 'cout'),
-
-  builtin('std::cout', 'std::cout << ${1:value} << "\\n"', 'Print to stdout', '', true),
-  builtin('std::cin', 'std::cin >> ${1:variable}', 'Read from stdin', '', true),
-  builtin('std::string', 'std::string', 'Standard string type', ''),
-  builtin('std::vector', 'std::vector<${1:T}>', 'Dynamic array', '', true),
-];
-
-const C_ITEMS = [
-  ...['auto', 'break', 'case', 'char', 'const', 'continue', 'default',
-      'do', 'double', 'else', 'enum', 'extern', 'float', 'for', 'goto',
-      'if', 'inline', 'int', 'long', 'register', 'restrict', 'return',
-      'short', 'signed', 'sizeof', 'static', 'struct', 'switch', 'typedef',
-      'union', 'unsigned', 'void', 'volatile', 'while'].map(kw),
-
-  snip('main', '#include <stdio.h>\n\nint main(void) {\n    ${1:// body}\n    return 0;\n}', 'Main function', '', '50', 'main'),
-  snip('printf', 'printf("${1:%s}\\n", ${2:args});', 'printf', '', '25', 'printf'),
-  builtin('printf', 'printf("${1:format}", ${2:args})', 'Print formatted output', '', true),
-];
-
-const GO_ITEMS = [
-  ...['break', 'case', 'chan', 'const', 'continue', 'default', 'defer',
-      'else', 'fallthrough', 'for', 'func', 'go', 'goto', 'if', 'import',
-      'interface', 'map', 'package', 'range', 'return', 'select', 'struct',
-      'switch', 'type', 'var'].map(kw),
-
-  snip('main', 'package main\n\nimport "fmt"\n\nfunc main() {\n    ${1:// body}\n}', 'Main package', '', '50', 'main'),
-  snip('func', 'func ${1:name}(${2:args}) ${3:returnType} {\n    ${4:// body}\n}', 'Function definition', '', '30', 'func'),
-  builtin('fmt.Println', 'fmt.Println(${1:args})', 'fmt.Println — print with newline', '', true),
-];
-
-const RUST_ITEMS = [
-  ...['as', 'async', 'await', 'break', 'const', 'continue', 'crate',
-      'dyn', 'else', 'enum', 'extern', 'false', 'fn', 'for', 'if', 'impl',
-      'in', 'let', 'loop', 'match', 'mod', 'move', 'mut', 'pub', 'ref',
-      'return', 'self', 'Self', 'static', 'struct', 'super', 'trait',
-      'true', 'type', 'union', 'unsafe', 'use', 'where', 'while'].map(kw),
-
-  snip('main', 'fn main() {\n    ${1:// body}\n}', 'Main function', '', '50', 'main'),
-  snip('fn', 'fn ${1:name}(${2:args}) ${3:-> ReturnType} {\n    ${4:// body}\n}', 'Function definition', '', '30', 'fn'),
-  builtin('println!', 'println!("${1:{:?}}", ${2:val})', 'println! — print with newline', '', true),
-];
-
-const CSHARP_ITEMS = [
-  ...['abstract', 'as', 'async', 'await', 'base', 'bool', 'break', 'byte',
-      'case', 'catch', 'char', 'class', 'const', 'continue', 'default',
-      'do', 'double', 'else', 'enum', 'event', 'false', 'finally', 'float',
-      'for', 'foreach', 'if', 'int', 'interface', 'internal', 'is', 'lock',
-      'long', 'namespace', 'new', 'null', 'object', 'override', 'private',
-      'protected', 'public', 'readonly', 'record', 'return', 'static',
-      'string', 'struct', 'switch', 'this', 'throw', 'true', 'try',
-      'using', 'var', 'virtual', 'void', 'while'].map(kw),
-
-  snip('class', 'public class ${1:ClassName}\n{\n    ${2:// body}\n}', 'Public class', '', '30', 'class'),
-  snip('cw', 'Console.WriteLine(${1:value});', 'Console.WriteLine', '', '25', 'cw'),
-  builtin('Console.WriteLine', 'Console.WriteLine(${1:value});', 'Print line to console', '', true),
-];
-
-const RUBY_ITEMS = [
-  ...['alias', 'and', 'begin', 'break', 'case', 'class', 'def', 'do',
-      'else', 'elsif', 'end', 'false', 'for', 'if', 'in', 'module',
-      'next', 'nil', 'not', 'or', 'rescue', 'return', 'self', 'super',
-      'then', 'true', 'unless', 'until', 'when', 'while', 'yield'].map(kw),
-  builtin('puts', 'puts ${1:value}', 'Print with newline', '', true),
-];
-
-const PHP_ITEMS = [
-  ...['abstract', 'and', 'array', 'as', 'break', 'case', 'catch',
-      'class', 'const', 'continue', 'default', 'do', 'echo', 'else',
-      'enum', 'extends', 'false', 'final', 'finally', 'fn', 'for',
-      'foreach', 'function', 'if', 'implements', 'interface', 'new',
-      'null', 'private', 'protected', 'public', 'return', 'static',
-      'switch', 'throw', 'true', 'try', 'var', 'while'].map(kw),
-  builtin('echo', 'echo ${1:$value};', 'Output a value', '', true),
-];
-
-const KOTLIN_ITEMS = [
-  ...['abstract', 'as', 'break', 'class', 'const', 'continue', 'data',
-      'do', 'else', 'enum', 'false', 'final', 'finally', 'for', 'fun',
-      'if', 'import', 'in', 'interface', 'is', 'null', 'object', 'open',
-      'override', 'package', 'private', 'protected', 'public', 'return',
-      'sealed', 'super', 'this', 'throw', 'true', 'try', 'val', 'var',
-      'when', 'while'].map(kw),
-  snip('fun', 'fun ${1:name}(${2:args}): ${3:Unit} {\n    ${4:// body}\n}', 'Function definition', '', '30', 'fun'),
-  builtin('println', 'println(${1:value})', 'Print with newline', '', true),
-];
-
-const SWIFT_ITEMS = [
-  ...['associatedtype', 'class', 'deinit', 'enum', 'extension', 'func',
-      'import', 'init', 'let', 'open', 'private', 'protocol', 'public',
-      'static', 'struct', 'var', 'break', 'case', 'catch', 'continue',
-      'default', 'else', 'for', 'guard', 'if', 'in', 'return', 'switch',
-      'while', 'true', 'false', 'nil', 'self', 'try'].map(kw),
-  builtin('print', 'print(${1:value})', 'Print to stdout', '', true),
-];
-
-const SQL_ITEMS = [
-  ...['ADD', 'ALTER', 'AND', 'AS', 'ASC', 'BY', 'CASE', 'CAST',
-      'COUNT', 'CREATE', 'DATABASE', 'DEFAULT', 'DELETE', 'DESC',
-      'DISTINCT', 'DROP', 'ELSE', 'END', 'FROM', 'GROUP', 'HAVING',
-      'IN', 'INDEX', 'INSERT', 'INTO', 'IS', 'JOIN', 'KEY', 'LEFT',
-      'LIKE', 'LIMIT', 'MAX', 'MIN', 'NOT', 'NULL', 'ON', 'OR',
-      'ORDER', 'PRIMARY', 'RIGHT', 'SELECT', 'SET', 'TABLE', 'UNION',
-      'UPDATE', 'VALUES', 'WHERE'].map(kw),
-  snip('select', 'SELECT ${1:*}\nFROM ${2:table_name}\nWHERE ${3:condition};', 'SELECT statement', '', '30', 'select'),
-];
-
-// ---------------------------------------------------------------------------
-// Provider Registration & Engine
+// Provider Registration
 // ---------------------------------------------------------------------------
 
 const TRIGGER_CHARS = {
-  python:     ['.', '@'],
-  java:       ['.', '@'],
-  cpp:        ['.', ':', '>'],
-  c:          ['.', '>'],
-  go:         ['.'],
-  rust:       ['.', ':'],
-  csharp:     ['.'],
-  ruby:       ['.', ':'],
-  php:        ['.', '>', ':'],
-  kotlin:     ['.', '?', ':'],
-  swift:      ['.'],
-  sql:        ['.'],
-  javascript: ['.'],
-  typescript: ['.'],
+  java: ['.'], python: ['.'], cpp: ['.', '>'], c: ['.', '>'],
+  csharp: ['.'], kotlin: ['.'], go: ['.'], rust: ['.', ':'],
+  ruby: ['.'], php: ['>', ':'], swift: ['.'], sql: ['.'],
 };
 
-const LANGUAGE_COMPLETIONS = {
-  python: PYTHON_ITEMS,
-  java:   JAVA_ITEMS,
-  cpp:    CPP_ITEMS,
-  c:      C_ITEMS,
-  go:     GO_ITEMS,
-  rust:   RUST_ITEMS,
-  csharp: CSHARP_ITEMS,
-  ruby:   RUBY_ITEMS,
-  php:    PHP_ITEMS,
-  kotlin: KOTLIN_ITEMS,
-  swift:  SWIFT_ITEMS,
-  sql:    SQL_ITEMS,
-  javascript: [],
-  typescript: [],
+const LANG_KEYWORDS = {
+  java: ['abstract','assert','boolean','break','byte','case','catch','char','class','continue','default','do','double','else','enum','extends','final','finally','float','for','if','implements','import','instanceof','int','interface','long','native','new','null','package','private','protected','public','record','return','sealed','short','static','super','switch','synchronized','this','throw','throws','transient','try','var','void','volatile','while','yield','true','false'],
+  python: ['False','None','True','and','as','assert','async','await','break','class','continue','def','del','elif','else','except','finally','for','from','global','if','import','in','is','lambda','nonlocal','not','or','pass','raise','return','try','while','with','yield'],
+  cpp: ['auto','bool','break','case','catch','char','class','const','constexpr','continue','default','delete','do','double','else','enum','explicit','extern','false','float','for','friend','if','inline','int','long','namespace','new','nullptr','private','protected','public','return','short','signed','sizeof','static','struct','switch','template','this','throw','true','try','typedef','typename','union','unsigned','using','virtual','void','volatile','while'],
+  c: ['auto','break','case','char','const','continue','default','do','double','else','enum','extern','float','for','goto','if','inline','int','long','register','restrict','return','short','signed','sizeof','static','struct','switch','typedef','union','unsigned','void','volatile','while'],
+  csharp: ['abstract','as','async','await','base','bool','break','byte','case','catch','char','class','const','continue','default','do','double','else','enum','event','false','finally','float','for','foreach','if','int','interface','internal','is','lock','long','namespace','new','null','object','override','private','protected','public','readonly','return','static','string','struct','switch','this','throw','true','try','using','var','virtual','void','while'],
+  kotlin: ['abstract','as','break','class','const','continue','data','do','else','enum','false','final','finally','for','fun','if','import','in','interface','is','null','object','open','override','package','private','protected','public','return','sealed','super','this','throw','true','try','val','var','when','while'],
+  go: ['break','case','chan','const','continue','default','defer','else','fallthrough','for','func','go','goto','if','import','interface','map','package','range','return','select','struct','switch','type','var'],
+  rust: ['as','async','await','break','const','continue','crate','dyn','else','enum','extern','false','fn','for','if','impl','in','let','loop','match','mod','move','mut','pub','ref','return','self','Self','static','struct','super','trait','true','type','unsafe','use','where','while'],
+  ruby: ['alias','and','begin','break','case','class','def','do','else','elsif','end','false','for','if','in','module','next','nil','not','or','rescue','return','self','super','then','true','unless','until','when','while','yield'],
+  php: ['abstract','and','array','as','break','case','catch','class','const','continue','default','do','echo','else','enum','extends','false','final','finally','fn','for','foreach','function','if','implements','interface','new','null','private','protected','public','return','static','switch','throw','true','try','var','while'],
+  swift: ['associatedtype','class','deinit','enum','extension','func','import','init','let','open','private','protocol','public','static','struct','var','break','case','catch','continue','default','else','for','guard','if','in','return','switch','while','true','false','nil','self','try'],
+  kotlin: ['abstract','as','break','class','const','continue','data','do','else','enum','false','final','finally','for','fun','if','import','in','interface','is','null','object','open','override','package','private','protected','public','return','sealed','super','this','throw','true','try','val','var','when','while'],
 };
 
-const LANGUAGE_MEMBER_DEFS = {
-  java:       JAVA_MEMBERS,
-  python:     PYTHON_MEMBERS,
-  cpp:        CPP_MEMBERS,
-  c:          CPP_MEMBERS,
-  csharp:     JAVA_MEMBERS,
-  kotlin:     JAVA_MEMBERS,
-  javascript: JAVA_MEMBERS,
-  typescript: JAVA_MEMBERS,
-};
+let disposables = [];
 
-let activeDisposables = [];
-
-/**
- * Registers multi-language dynamic code completion and symbol intelligence providers.
- *
- * @param {import('monaco-editor').Monaco} monaco
- */
 export function registerCompletionProviders(monaco) {
-  // Dispose any existing registrations first to guarantee fresh provider
-  while (activeDisposables.length > 0) {
-    const d = activeDisposables.pop();
-    if (d && typeof d.dispose === 'function') d.dispose();
-  }
+  // Dispose previous to avoid duplicates on HMR
+  disposables.forEach(d => { try { d.dispose(); } catch {} });
+  disposables = [];
 
   const kinds = monaco.languages.CompletionItemKind;
+  const allLanguages = Object.keys({ ...SNIPPETS, java: 1 });
 
-  for (const [language, staticItems] of Object.entries(LANGUAGE_COMPLETIONS)) {
-    const triggers = TRIGGER_CHARS[language] ?? ['.'];
+  for (const lang of allLanguages) {
+    const triggers = TRIGGER_CHARS[lang] || [];
+    const snippets = SNIPPETS[lang] || [];
+    const builtins = BUILTINS[lang] || [];
+    const keywords = (LANG_KEYWORDS[lang] || []).map(kw);
+    const memberList = MEMBERS[lang] || [];
 
     try {
-      const disposable = monaco.languages.registerCompletionItemProvider(language, {
+      const d = monaco.languages.registerCompletionItemProvider(lang, {
         triggerCharacters: triggers,
 
         provideCompletionItems(model, position) {
-          const lineContent = model.getLineContent(position.lineNumber);
-          const lineUntilCursor = lineContent.substring(0, position.column - 1);
-          const word = model.getWordUntilPosition(position);
+          const lineUntil = model.getLineContent(position.lineNumber).substring(0, position.column - 1);
+          const wordInfo = model.getWordUntilPosition(position);
+          const currentWord = wordInfo.word;
 
           const range = {
             startLineNumber: position.lineNumber,
-            endLineNumber:   position.lineNumber,
-            startColumn:     word.startColumn,
-            endColumn:       word.endColumn,
+            endLineNumber: position.lineNumber,
+            startColumn: wordInfo.startColumn,
+            endColumn: wordInfo.endColumn,
           };
 
-          const fullCode = model.getValue();
-          const docSymbols = extractDocumentSymbols(fullCode, language, monaco);
-
-          // 1. Context: Class/Interface/Type Declaration Line (e.g. `public class Main`)
-          const isClassDeclaration = /^\s*(?:public|protected|private|static|final|abstract|sealed|open|data|\s)*\b(?:class|interface|enum|record|struct)\s+[A-Za-z0-9_$]*$/.test(lineUntilCursor);
-          if (isClassDeclaration) {
+          // Guard: type declaration header → no suggestions (prevents snippet hijacking class names)
+          if (/^\s*(?:(?:public|protected|private|static|final|abstract|sealed|open|data)\s+)*(?:class|interface|enum|record|struct)\s+\w*$/.test(lineUntil)) {
             return { suggestions: [] };
           }
 
-          // 2. Context: After `new ` (e.g. `new Main`, `new Array`, `new `)
-          const isAfterNew = /\bnew\s+[A-Za-z0-9_$<>]*$/.test(lineUntilCursor);
-          if (isAfterNew) {
-            const constructorSuggestions = [];
-
-            // Add constructors of classes extracted from current document
-            for (const sym of docSymbols) {
-              if (sym.kind === (kinds.Class || 6) || sym.kind === (kinds.Constructor || 2)) {
-                constructorSuggestions.push({
-                  ...sym,
-                  sortText: '00_' + sym.label,
-                  range,
-                });
-              }
-            }
-
-            // Add common standard constructors for Java
-            if (language === 'java') {
-              for (const c of JAVA_COMMON_CONSTRUCTORS) {
-                constructorSuggestions.push({
-                  ...c,
-                  range,
-                });
-              }
-            }
-
-            return { suggestions: constructorSuggestions };
-          }
-
-          // 3. Context: Member Access (e.g. `obj.`, `this.`, `str.`, `Main.`)
-          const isMemberAccess = /[\.\:\>]\s*[A-Za-z0-9_$]*$/.test(lineUntilCursor);
-          if (isMemberAccess) {
-            const memberSuggestions = [];
-            const memberDefs = LANGUAGE_MEMBER_DEFS[language] || [];
-
-            // Add standard library member methods
-            for (const m of memberDefs) {
-              memberSuggestions.push({
+          // Member access context (triggered by ".", ">", "::")
+          if (/[\.>\:]\s*\w*$/.test(lineUntil)) {
+            return {
+              suggestions: memberList.map(m => ({
                 label: m.label,
-                kind: m.kind === 3 ? (kinds.Field || 4) : (kinds.Method || 0),
+                kind: m.kind === 'field' ? (kinds.Field || 4) : (kinds.Method || 0),
                 detail: m.detail,
-                insertText: m.insertText,
-                insertTextRules: m.isSnippet ? 4 : 0,
-                sortText: '00_' + m.label,
+                insertText: m.insert,
+                insertTextRules: m.snip ? 4 : undefined,
+                sortText: '0_' + m.label,
                 range,
-                documentation: m.doc ? { value: m.doc } : undefined,
-              });
-            }
-
-            // Add custom methods & fields declared in current document
-            for (const sym of docSymbols) {
-              if (sym.kind === (kinds.Method || 0) || sym.kind === (kinds.Function || 1) || sym.kind === (kinds.Field || 4) || sym.kind === (kinds.Variable || 5)) {
-                memberSuggestions.push({
-                  ...sym,
-                  sortText: '01_' + sym.label,
-                  range,
-                });
-              }
-            }
-
-            return { suggestions: memberSuggestions };
+              })),
+            };
           }
 
-          // 4. General Completion (Document Symbols + Keywords + Stdlib + Snippets)
-          const workspaceSymbols = [];
-          try {
-            const allModels = monaco.editor.getModels();
-            for (const m of allModels) {
-              if (m !== model && m.getValueLength() < 100000) {
-                const otherCode = m.getValue();
-                const otherSymbols = extractDocumentSymbols(otherCode, language, monaco);
-                for (const s of otherSymbols) {
-                  if (s.kind === (kinds.Class || 6) || s.kind === (kinds.Interface || 7)) {
-                    workspaceSymbols.push(s);
-                  }
-                }
-              }
-            }
-          } catch {
-            // Ignore cross-model extraction errors
-          }
-
-          const allSuggestions = [
-            ...docSymbols.map(s => ({ ...s, range })),
-            ...workspaceSymbols.map(s => ({ ...s, range })),
-            ...staticItems.map(item => ({ ...item, range })),
-          ];
+          // General completion: word suggestions + snippets + keywords + builtins
+          const wordSuggestions = getWordSuggestions(model, lang, currentWord, kinds);
 
           return {
-            suggestions: allSuggestions,
+            suggestions: [
+              ...wordSuggestions.map(s => ({ ...s, range })),
+              ...snippets.map(s => ({ ...s, range })),
+              ...builtins.map(s => ({ ...s, range })),
+              ...keywords.map(s => ({ ...s, range })),
+            ],
           };
         },
       });
 
-      activeDisposables.push(disposable);
+      disposables.push(d);
     } catch {
-      // Provider already registered
+      // ignore
     }
   }
 }
