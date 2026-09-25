@@ -459,6 +459,12 @@ function App() {
   const [baselineInitialized, setBaselineInitialized] = useState(false)
   const [contentRevision, setContentRevision] = useState(0)
 
+  const visibleFilePaths = useMemo(
+    () => fileList.filter((f) => !f.endsWith(".keep") || fileList.length === 1),
+    [fileList]
+  )
+  const fileTree = useMemo(() => buildTreeFromPaths(fileList), [fileList])
+
   // User Hierarchy & Role-Based Access Control
   const [rolesMap, setRolesMap] = useState({})
 
@@ -3007,12 +3013,6 @@ function App() {
     () => diagnostics.filter((d) => d.severity === SEVERITY.WARNING).length,
     [diagnostics]
   )
-
-  const visibleFilePaths = useMemo(
-    () => fileList.filter((f) => !f.endsWith(".keep") || fileList.length === 1),
-    [fileList]
-  )
-  const fileTree = useMemo(() => buildTreeFromPaths(fileList), [fileList])
 
   /**
    * Recursive tree item renderer for VS Code style directory tree.
