@@ -4871,7 +4871,28 @@ function App() {
                           renderWhitespace: "selection",
                           lineNumbersMinChars: 3,
                           wordWrap: wordWrap,
-                          readOnly: isViewer
+                          readOnly: isViewer,
+                          quickSuggestions: {
+                            other: true,
+                            comments: false,
+                            strings: true
+                          },
+                          suggestOnTriggerCharacters: true,
+                          acceptSuggestionOnEnter: "on",
+                          tabCompletion: "on",
+                          suggest: {
+                            localityBonus: true,
+                            shareSuggestSelections: true,
+                            showIcons: true,
+                            showSnippets: true,
+                            showClasses: true,
+                            showFunctions: true,
+                            showMethods: true,
+                            showVariables: true,
+                            showFields: true,
+                            showInterfaces: true,
+                            showKeywords: true
+                          }
                         }}
                       />
                     </div>
