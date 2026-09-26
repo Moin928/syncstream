@@ -104,6 +104,7 @@ public class TerminalExecutionService {
         sendSafely(socket, "\r\n[Execution error] " + error.getMessage() + "\r\n");
       } finally {
         destroyProcess(clientId, process);
+        syncSandboxFilesToClient(room, clientId, socket);
         sendSafely(socket, "$ ");
       }
     });
@@ -277,6 +278,7 @@ public class TerminalExecutionService {
       sendSafely(socket, "\r\n[Execution error] " + error.getMessage() + "\r\n");
     } finally {
       destroyProcess(clientId, process);
+      syncSandboxFilesToClient(room, clientId, socket);
       sendSafely(socket, "$ ");
     }
   }
@@ -518,6 +520,64 @@ public class TerminalExecutionService {
       Files.writeString(filePath, code, StandardCharsets.UTF_8);
     } catch (IOException e) {
       logger.error("Failed writing local fallback file", e);
+    }
+  }
+
+  /**
+   * Synchronizes all editor files into the runner / sandbox directory.
+   */
+  public void syncFilesToSandbox(String room, String clientId, Map<String, String> files) {
+    if (files == null || files.isEmpty()) return;
+    for (Map.Entry<String, String> entry : files.entrySet()) {
+      String fname = entry.getKey();
+      String code = entry.getValue();
+      boolean written = writeFileToRunner(room, clientId, fname, code);
+      if (!written) {
+        writeLocalFileFallback(room, clientId, fname, code);
+      }
+    }
+  }
+
+  /**
+   * Scans the sandbox directory for any files created or modified by terminal commands,
+   * and sends an invisible sync envelope to the client to update the File Explorer.
+   */
+  public void syncSandboxFilesToClient(String room, String clientId, WebSocketSession socket) {
+    if (socket == null || !socket.isOpen()) return;
+    try {
+      Path localDir = getLocalSandboxDir(room, clientId);
+      if (!Files.exists(localDir)) return;
+
+      Map<String, String> scannedFiles = new java.util.HashMap<>();
+      try (var stream = Files.walk(localDir, 8)) {
+        stream.filter(Files::isRegularFile).forEach(path -> {
+          String relPath = localDir.relativize(path).toString().replace('\\', '/');
+          // Ignore binary and temp artifacts
+          if (relPath.endsWith(".class") || relPath.endsWith(".exe") || relPath.endsWith(".o")
+              || relPath.endsWith("_bin") || relPath.endsWith(".jar") || relPath.startsWith(".")
+              || relPath.contains("/.") || relPath.contains("node_modules/")) {
+            return;
+          }
+          try {
+            if (Files.size(path) < 500_000) {
+              String content = Files.readString(path, StandardCharsets.UTF_8);
+              scannedFiles.put(relPath, content);
+            }
+          } catch (Exception ignored) {}
+        });
+      }
+
+      if (!scannedFiles.isEmpty()) {
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        Map<String, Object> payload = Map.of(
+          "type", "fs_sync",
+          "files", scannedFiles
+        );
+        String json = mapper.writeValueAsString(payload);
+        sendSafely(socket, "\u001B[SYNC]" + json + "\u001B[ENDSYNC]");
+      }
+    } catch (Exception e) {
+      logger.debug("Failed syncing sandbox to client: {}", e.getMessage());
     }
   }
 

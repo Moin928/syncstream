@@ -1324,8 +1324,65 @@ function App() {
         text = new TextDecoder().decode(new Uint8Array(event.data))
       }
 
-      terminal.write(text)
-      setOutputLogs((prev) => prev + text)
+      // 1. Intercept file synchronization envelopes: \u001B[SYNC]...json...\u001B[ENDSYNC]
+      if (text.includes("\u001B[SYNC]")) {
+        const syncMatch = text.match(/\u001B\[SYNC\]([\s\S]*?)\u001B\[ENDSYNC\]/)
+        if (syncMatch && syncMatch[1]) {
+          try {
+            const syncData = JSON.parse(syncMatch[1])
+            if (syncData.type === "fs_sync" && syncData.files) {
+              const scannedFiles = syncData.files
+              const existingKeys = new Set(yfiles.keys())
+              const newKeys = Object.keys(scannedFiles)
+
+              ydoc.transact(() => {
+                // Add or update modified files in the workspace
+                for (const [fname, content] of Object.entries(scannedFiles)) {
+                  if (fname.endsWith(".keep") && newKeys.length > 1) continue
+
+                  const fileLang = getLanguageFromFileName(fname)
+                  if (!yfiles.has(fname)) {
+                    yfiles.set(fname, { name: fname, language: fileLang })
+                  }
+
+                  const fileText = ydoc.getText("file:" + fname)
+                  if (fileText.toString() !== content) {
+                    fileText.delete(0, fileText.length)
+                    fileText.insert(0, content)
+                  }
+
+                  // Auto-expand any parent folders
+                  const parts = fname.split("/")
+                  if (parts.length > 1) {
+                    const parents = []
+                    for (let i = 1; i < parts.length; i++) {
+                      parents.push(parts.slice(0, i).join("/"))
+                    }
+                    setExpandedFolders((prev) => new Set([...prev, ...parents]))
+                  }
+                }
+
+                // Remove files deleted in the terminal sandbox
+                for (const oldKey of existingKeys) {
+                  if (!oldKey.endsWith(".keep") && !(oldKey in scannedFiles) && newKeys.length > 0) {
+                    yfiles.delete(oldKey)
+                    const oldText = ydoc.getText("file:" + oldKey)
+                    if (oldText.length > 0) oldText.delete(0, oldText.length)
+                  }
+                }
+              })
+            }
+          } catch (e) {
+            console.error("Failed parsing fs_sync envelope:", e)
+          }
+        }
+        text = text.replace(/\u001B\[SYNC\][\s\S]*?\u001B\[ENDSYNC\]/g, "")
+      }
+
+      if (text) {
+        terminal.write(text)
+        setOutputLogs((prev) => prev + text)
+      }
 
       if (
         text.includes("Execution Finished") ||
@@ -1363,12 +1420,17 @@ function App() {
     }
 
     let command = ""
+    let cursorPos = 0
     const cmdHistory = []
     let historyIndex = -1
     let savedCommand = ""
 
-    const rewriteLine = (text) => {
-      terminal.write("\r\u001B[K$ " + text)
+    const renderLine = () => {
+      terminal.write("\r\u001B[K$ " + command)
+      const offset = command.length - cursorPos
+      if (offset > 0) {
+        terminal.write(`\u001B[${offset}D`)
+      }
     }
 
     const dataDisposable = terminal.onData((data) => {
@@ -1381,6 +1443,7 @@ function App() {
             socket.send(command)
           }
           command = ""
+          cursorPos = 0
           return
         }
 
@@ -1393,41 +1456,188 @@ function App() {
           historyIndex = -1
           savedCommand = ""
 
+          // 1. Built-in Client Commands
+          if (trimmed === "clear") {
+            terminal.write("\u001B[2J\u001B[H$ ")
+            command = ""
+            cursorPos = 0
+            return
+          }
+
+          if (trimmed.startsWith("open ") || trimmed.startsWith("code ")) {
+            const targetFile = trimmed.replace(/^(open|code)\s+/, "").trim()
+            const match = Array.from(yfiles.keys()).find(
+              (f) => f === targetFile || f.endsWith("/" + targetFile) || f.toLowerCase() === targetFile.toLowerCase()
+            )
+            if (match) {
+              handleSelectFile(match)
+              terminal.write(`\u001B[32mOpened ${match} in editor\u001B[0m\r\n$ `)
+            } else {
+              terminal.write(`\u001B[31mFile not found in workspace: ${targetFile}\u001B[0m\r\n$ `)
+            }
+            command = ""
+            cursorPos = 0
+            return
+          }
+
+          if (trimmed === "run" || trimmed.startsWith("run ")) {
+            const targetArg = trimmed.replace(/^run\s*/, "").trim()
+            const targetFile = targetArg || activeFileRef.current
+            handleRunCode(targetFile)
+            command = ""
+            cursorPos = 0
+            return
+          }
+
+          // 2. Shell Execution with Workspace File Synchronization
+          const filesPayload = {}
+          for (const fname of yfiles.keys()) {
+            filesPayload[fname] = ydoc.getText("file:" + fname).toString()
+          }
+
+          const payload = JSON.stringify({
+            type: "exec",
+            command: trimmed,
+            files: filesPayload
+          })
+
           if (socket.readyState === WebSocket.OPEN) {
-            socket.send(command)
+            setIsRunning(true)
+            socket.send(payload)
           }
         } else {
           terminal.write("$ ")
         }
 
         command = ""
+        cursorPos = 0
         return
       }
 
       // Backspace (DEL)
-      if (data === "\u007F") {
-        if (command.length > 0) {
-          command = command.slice(0, -1)
-          terminal.write("\b \b")
+      if (data === "\u007F" || data === "\b") {
+        if (cursorPos > 0) {
+          command = command.slice(0, cursorPos - 1) + command.slice(cursorPos)
+          cursorPos--
+          renderLine()
         }
         return
       }
 
-      // Ctrl+C — interrupt
-      if (data === "\u0003") {
-        command = ""
-        historyIndex = -1
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send("\u0003")
+      // Delete key (\u001B[3~)
+      if (data === "\u001B[3~") {
+        if (cursorPos < command.length) {
+          command = command.slice(0, cursorPos) + command.slice(cursorPos + 1)
+          renderLine()
         }
-        terminal.write("^C\r\n")
-        setIsRunning(false)
+        return
+      }
+
+      // Left Arrow (\u001B[D)
+      if (data === "\u001B[D") {
+        if (cursorPos > 0) {
+          cursorPos--
+          terminal.write("\u001B[D")
+        }
+        return
+      }
+
+      // Right Arrow (\u001B[C)
+      if (data === "\u001B[C") {
+        if (cursorPos < command.length) {
+          cursorPos++
+          terminal.write("\u001B[C")
+        }
+        return
+      }
+
+      // Home / Ctrl+A (\u0001, \u001B[H, \u001B[1~)
+      if (data === "\u0001" || data === "\u001B[H" || data === "\u001B[1~") {
+        cursorPos = 0
+        renderLine()
+        return
+      }
+
+      // End / Ctrl+E (\u0005, \u001B[F, \u001B[4~)
+      if (data === "\u0005" || data === "\u001B[F" || data === "\u001B[4~") {
+        cursorPos = command.length
+        renderLine()
+        return
+      }
+
+      // Ctrl+W — delete word before cursor
+      if (data === "\u0017") {
+        if (cursorPos > 0) {
+          const before = command.slice(0, cursorPos)
+          const match = before.match(/\s*\S+$/)
+          const delLen = match ? match[0].length : 1
+          command = command.slice(0, cursorPos - delLen) + command.slice(cursorPos)
+          cursorPos -= delLen
+          renderLine()
+        }
+        return
+      }
+
+      // Ctrl+U — clear from start to cursor
+      if (data === "\u0015") {
+        command = command.slice(cursorPos)
+        cursorPos = 0
+        renderLine()
+        return
+      }
+
+      // Ctrl+K — clear from cursor to end
+      if (data === "\u000B") {
+        command = command.slice(0, cursorPos)
+        renderLine()
         return
       }
 
       // Ctrl+L — clear screen
       if (data === "\u000C") {
-        terminal.write("\u001B[2J\u001B[H$ " + command)
+        terminal.write("\u001B[2J\u001B[H")
+        renderLine()
+        return
+      }
+
+      // Tab (\t) — Auto-completion for files & commands
+      if (data === "\t" || data === "\u0009") {
+        const prefix = (command.slice(0, cursorPos).split(/\s+/).pop() || "")
+        if (!prefix) return
+
+        const workspaceFiles = Array.from(yfiles.keys()).filter((f) => !f.endsWith(".keep"))
+        const standardCommands = [
+          "help", "clear", "ls", "dir", "tree", "open", "code", "cat", "touch",
+          "mkdir", "rm", "mv", "cp", "run", "node", "python", "python3", "javac",
+          "java", "gcc", "g++", "go", "rustc", "git", "whoami", "users", "version", "date", "env"
+        ]
+
+        const allCandidates = [...new Set([...workspaceFiles, ...standardCommands])]
+        const matches = allCandidates.filter((c) => c.toLowerCase().startsWith(prefix.toLowerCase()))
+
+        if (matches.length === 1) {
+          const match = matches[0]
+          const remainder = match.slice(prefix.length)
+          command = command.slice(0, cursorPos) + remainder + " " + command.slice(cursorPos)
+          cursorPos += remainder.length + 1
+          renderLine()
+        } else if (matches.length > 1) {
+          terminal.write("\r\n\u001B[36m" + matches.join("   ") + "\u001B[0m\r\n")
+          renderLine()
+        }
+        return
+      }
+
+      // Ctrl+C — interrupt running process or cancel current input
+      if (data === "\u0003") {
+        if (isRunningRef.current && socket.readyState === WebSocket.OPEN) {
+          socket.send("\u0003")
+        }
+        command = ""
+        cursorPos = 0
+        historyIndex = -1
+        terminal.write("^C\r\n$ ")
+        setIsRunning(false)
         return
       }
 
@@ -1440,8 +1650,9 @@ function App() {
         } else if (historyIndex > 0) {
           historyIndex--
         }
-        command = cmdHistory[historyIndex]
-        rewriteLine(command)
+        command = cmdHistory[historyIndex] || ""
+        cursorPos = command.length
+        renderLine()
         return
       }
 
@@ -1450,23 +1661,29 @@ function App() {
         if (historyIndex === -1) return
         if (historyIndex < cmdHistory.length - 1) {
           historyIndex++
-          command = cmdHistory[historyIndex]
+          command = cmdHistory[historyIndex] || ""
         } else {
           historyIndex = -1
           command = savedCommand
         }
-        rewriteLine(command)
+        cursorPos = command.length
+        renderLine()
         return
       }
 
-      if (data === "\u001B[C" || data === "\u001B[D") {
+      // Ignore unhandled escape sequences
+      if (data.startsWith("\u001B") && data.length > 1) {
         return
       }
 
-      // Printable characters
-      if (data >= " " && data <= "~") {
-        command += data
-        terminal.write(data)
+      // Printable characters & multi-character pastes
+      if (data.length > 0 && !data.includes("\r") && !data.includes("\n")) {
+        const cleanData = data.replace(/[\x00-\x1F\x7F]/g, "")
+        if (cleanData.length > 0) {
+          command = command.slice(0, cursorPos) + cleanData + command.slice(cursorPos)
+          cursorPos += cleanData.length
+          renderLine()
+        }
       }
     })
 

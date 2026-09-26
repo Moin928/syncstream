@@ -324,6 +324,42 @@ public class TerminalWebSocketHandler
         return true;
       }
 
+      if ("exec".equals(type)) {
+        String command = node.has("command") ? node.get("command").asText("") : "";
+        Map<String, String> files = new java.util.HashMap<>();
+        if (node.has("files") && node.get("files").isObject()) {
+          node.get("files").fields().forEachRemaining(entry -> {
+            files.put(entry.getKey(), entry.getValue().asText());
+          });
+        }
+
+        String room = (String) session.getAttributes().get("room");
+        if (!files.isEmpty() && room != null) {
+          executionService.syncFilesToSandbox(room, clientId, files);
+        }
+
+        if (command.isBlank()) {
+          send(session, "$ ");
+          return true;
+        }
+
+        // Builtin command check
+        if (handleBuiltinCommand(session, command, clientId)) {
+          return true;
+        }
+
+        // Rate limit check
+        if (!checkRateLimit(clientId)) {
+          send(session,
+            "\r\n\u001B[33m[Rate limit] Too many commands. Please wait a moment.\u001B[0m\r\n$ "
+          );
+          return true;
+        }
+
+        executionService.execute(clientId, command);
+        return true;
+      }
+
       return false;
 
     } catch (Exception ignored) {
