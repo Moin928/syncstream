@@ -1456,12 +1456,311 @@ function App() {
           historyIndex = -1
           savedCommand = ""
 
-          // 1. Built-in Client Commands
+          // 1. Built-in Client Commands & Shell Utilities
           if (trimmed === "clear") {
             terminal.write("\u001B[2J\u001B[H$ ")
             command = ""
             cursorPos = 0
             return
+          }
+
+          if (trimmed === "pwd") {
+            terminal.write("\u001B[34m/workspace\u001B[0m\r\n$ ")
+            command = ""
+            cursorPos = 0
+            return
+          }
+
+          if (trimmed === "history") {
+            let histOut = "\r\n"
+            cmdHistory.forEach((c, idx) => {
+              histOut += `  \u001B[33m${(idx + 1).toString().padStart(3, " ")}\u001B[0m  ${c}\r\n`
+            })
+            terminal.write(histOut + "$ ")
+            command = ""
+            cursorPos = 0
+            return
+          }
+
+          if (trimmed === "tree") {
+            let treeOut = "\r\n\u001B[34m.\u001B[0m\r\n"
+            const buildAsciiTree = (nodes, prefix = "") => {
+              nodes.forEach((node, i) => {
+                if (node.name === ".keep") return
+                const isLast = i === nodes.length - 1
+                const connector = isLast ? "└── " : "├── "
+                if (node.isDirectory) {
+                  treeOut += `${prefix}${connector}\u001B[1;34m${node.name}/\u001B[0m\r\n`
+                  if (node.children) {
+                    buildAsciiTree(node.children, prefix + (isLast ? "    " : "│   "))
+                  }
+                } else {
+                  treeOut += `${prefix}${connector}\u001B[32m${node.name}\u001B[0m\r\n`
+                }
+              })
+            }
+            buildAsciiTree(fileTree)
+            terminal.write(treeOut + "$ ")
+            command = ""
+            cursorPos = 0
+            return
+          }
+
+          if (trimmed === "ls" || trimmed === "dir" || trimmed.startsWith("ls ") || trimmed.startsWith("dir ")) {
+            const keys = Array.from(yfiles.keys()).filter((f) => !f.endsWith(".keep"))
+            const folders = new Set()
+            const rootFiles = []
+
+            keys.forEach((k) => {
+              if (k.includes("/")) {
+                folders.add(k.split("/")[0])
+              } else {
+                rootFiles.push(k)
+              }
+            })
+
+            let out = "\r\n"
+            Array.from(folders).sort().forEach((f) => {
+              out += `\u001B[1;34m📁 ${f}/\u001B[0m    `
+            })
+            rootFiles.sort().forEach((f) => {
+              const text = ydoc.getText("file:" + f).toString()
+              const bytes = new TextEncoder().encode(text).length
+              const sizeStr = bytes > 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`
+              out += `\u001B[32m📄 ${f}\u001B[0m \u001B[90m(${sizeStr})\u001B[0m    `
+            })
+            terminal.write(out + "\r\n\r\n$ ")
+            command = ""
+            cursorPos = 0
+            return
+          }
+
+          if (trimmed.startsWith("cat ")) {
+            const targetFile = trimmed.replace(/^cat\s+/, "").trim()
+            const match = Array.from(yfiles.keys()).find(
+              (f) => f === targetFile || f.endsWith("/" + targetFile) || f.toLowerCase() === targetFile.toLowerCase()
+            )
+            if (match) {
+              const content = ydoc.getText("file:" + match).toString()
+              const lines = content.split("\n")
+              let out = "\r\n"
+              lines.forEach((l, idx) => {
+                out += `\u001B[90m${(idx + 1).toString().padStart(3, " ")} | \u001B[0m${l}\r\n`
+              })
+              terminal.write(out + "$ ")
+            } else {
+              terminal.write(`\r\n\u001B[31mcat: ${targetFile}: No such file or directory\u001B[0m\r\n$ `)
+            }
+            command = ""
+            cursorPos = 0
+            return
+          }
+
+          if (trimmed.startsWith("touch ")) {
+            const targetFile = trimmed.replace(/^touch\s+/, "").trim()
+            if (targetFile) {
+              handleCreateNode(targetFile, false)
+              terminal.write(`\r\n\u001B[32mCreated file: ${targetFile}\u001B[0m\r\n$ `)
+            }
+            command = ""
+            cursorPos = 0
+            return
+          }
+
+          if (trimmed.startsWith("mkdir ")) {
+            const targetDir = trimmed.replace(/^mkdir\s+(-p\s+)?/, "").trim()
+            if (targetDir) {
+              handleCreateNode(targetDir, true)
+              terminal.write(`\r\n\u001B[32mCreated directory: ${targetDir}/\u001B[0m\r\n$ `)
+            }
+            command = ""
+            cursorPos = 0
+            return
+          }
+
+          if (trimmed.startsWith("rm ") || trimmed.startsWith("rmdir ")) {
+            const target = trimmed.replace(/^(rm|rmdir)\s+(-rf?\s+)?/, "").trim()
+            const isDir = Array.from(yfiles.keys()).some((k) => k.startsWith(target + "/"))
+            if (isDir) {
+              handleDeleteFolder(target)
+              terminal.write(`\r\n\u001B[33mRemoved directory: ${target}/\u001B[0m\r\n$ `)
+            } else {
+              const match = Array.from(yfiles.keys()).find(
+                (f) => f === target || f.endsWith("/" + target) || f.toLowerCase() === target.toLowerCase()
+              )
+              if (match) {
+                handleDeleteFile(match)
+                terminal.write(`\r\n\u001B[33mRemoved file: ${match}\u001B[0m\r\n$ `)
+              } else {
+                terminal.write(`\r\n\u001B[31mrm: cannot remove '${target}': No such file or directory\u001B[0m\r\n$ `)
+              }
+            }
+            command = ""
+            cursorPos = 0
+            return
+          }
+
+          if (trimmed.startsWith("mv ")) {
+            const parts = trimmed.replace(/^mv\s+/, "").trim().split(/\s+/)
+            if (parts.length >= 2) {
+              const oldPath = parts[0]
+              const newName = parts[1].split("/").pop()
+              handleRenameNode(oldPath, newName, false)
+              terminal.write(`\r\n\u001B[32mRenamed ${oldPath} -> ${parts[1]}\u001B[0m\r\n$ `)
+            } else {
+              terminal.write("\r\n\u001B[31musage: mv <source> <destination>\u001B[0m\r\n$ ")
+            }
+            command = ""
+            cursorPos = 0
+            return
+          }
+
+          if (trimmed.startsWith("cp ")) {
+            const parts = trimmed.replace(/^cp\s+/, "").trim().split(/\s+/)
+            if (parts.length >= 2) {
+              const src = parts[0]
+              const dst = parts[1]
+              if (yfiles.has(src)) {
+                const srcContent = ydoc.getText("file:" + src).toString()
+                ydoc.transact(() => {
+                  yfiles.set(dst, { name: dst, language: getLanguageFromFileName(dst) })
+                  const dstText = ydoc.getText("file:" + dst)
+                  dstText.delete(0, dstText.length)
+                  dstText.insert(0, srcContent)
+                })
+                terminal.write(`\r\n\u001B[32mCopied ${src} -> ${dst}\u001B[0m\r\n$ `)
+              } else {
+                terminal.write(`\r\n\u001B[31mcp: ${src}: No such file\u001B[0m\r\n$ `)
+              }
+            } else {
+              terminal.write("\r\n\u001B[31musage: cp <source> <destination>\u001B[0m\r\n$ ")
+            }
+            command = ""
+            cursorPos = 0
+            return
+          }
+
+          if (trimmed.startsWith("echo ")) {
+            const redirectMatch = trimmed.match(/^echo\s+(.*?)\s*(>>|>)\s*(\S+)$/)
+            if (redirectMatch) {
+              const textToWrite = redirectMatch[1].replace(/^["']|["']$/g, "")
+              const isAppend = redirectMatch[2] === ">>"
+              const targetFile = redirectMatch[3]
+
+              ydoc.transact(() => {
+                if (!yfiles.has(targetFile)) {
+                  yfiles.set(targetFile, { name: targetFile, language: getLanguageFromFileName(targetFile) })
+                }
+                const fileText = ydoc.getText("file:" + targetFile)
+                if (!isAppend) {
+                  fileText.delete(0, fileText.length)
+                  fileText.insert(0, textToWrite + "\n")
+                } else {
+                  fileText.insert(fileText.length, (fileText.length > 0 && !fileText.toString().endsWith("\n") ? "\n" : "") + textToWrite + "\n")
+                }
+              })
+              terminal.write(`\r\n\u001B[32mWrote to ${targetFile}\u001B[0m\r\n$ `)
+              command = ""
+              cursorPos = 0
+              return
+            } else {
+              const textToEcho = trimmed.replace(/^echo\s+/, "").replace(/^["']|["']$/g, "")
+              terminal.write(`\r\n${textToEcho}\r\n$ `)
+              command = ""
+              cursorPos = 0
+              return
+            }
+          }
+
+          if (trimmed.startsWith("grep ")) {
+            const pattern = trimmed.replace(/^grep\s+/, "").replace(/^["']|["']$/g, "").trim()
+            if (pattern) {
+              let matchCount = 0
+              let out = "\r\n"
+              Array.from(yfiles.keys()).forEach((fname) => {
+                if (fname.endsWith(".keep")) return
+                const content = ydoc.getText("file:" + fname).toString()
+                const lines = content.split("\n")
+                lines.forEach((line, idx) => {
+                  if (line.toLowerCase().includes(pattern.toLowerCase())) {
+                    matchCount++
+                    const highlighted = line.replace(
+                      new RegExp(pattern, "gi"),
+                      (m) => `\u001B[1;31m${m}\u001B[0m`
+                    )
+                    out += `\u001B[35m${fname}\u001B[0m:\u001B[32m${idx + 1}\u001B[0m: ${highlighted}\r\n`
+                  }
+                })
+              })
+              if (matchCount === 0) {
+                out += `\u001B[90mNo matches found for '${pattern}'\u001B[0m\r\n`
+              }
+              terminal.write(out + "$ ")
+            }
+            command = ""
+            cursorPos = 0
+            return
+          }
+
+          if (trimmed.startsWith("git ")) {
+            const gitSub = trimmed.replace(/^git\s+/, "").trim()
+
+            if (gitSub === "status") {
+              let out = "\r\n\u001B[36mOn branch main\u001B[0m\r\n"
+              const modified = Object.entries(gitStatusMap).filter(([_, st]) => st === "M")
+              const untracked = Object.entries(gitStatusMap).filter(([_, st]) => st === "U")
+
+              if (modified.length > 0) {
+                out += "\r\n\u001B[33mChanges not staged for commit:\u001B[0m\r\n"
+                modified.forEach(([f]) => {
+                  out += `  \u001B[31mmodified:   ${f}\u001B[0m\r\n`
+                })
+              }
+              if (untracked.length > 0) {
+                out += "\r\n\u001B[33mUntracked files:\u001B[0m\r\n"
+                untracked.forEach(([f]) => {
+                  out += `  \u001B[31m${f}\u001B[0m\r\n`
+                })
+              }
+              if (modified.length === 0 && untracked.length === 0) {
+                out += "\u001B[32mnothing to commit, working tree clean\u001B[0m\r\n"
+              }
+              terminal.write(out + "\r\n$ ")
+              command = ""
+              cursorPos = 0
+              return
+            }
+
+            if (gitSub === "log") {
+              let out = "\r\n"
+              if (commitsList.length === 0) {
+                out += "\u001B[90mNo commits yet in this repository.\u001B[0m\r\n"
+              } else {
+                commitsList.slice().reverse().forEach((c) => {
+                  out += `\u001B[33mcommit ${c.id.substring(0, 7)}\u001B[0m (\u001B[36mHEAD -> main\u001B[0m)\r\n`
+                  out += `Author: ${c.author}\r\n`
+                  out += `Date:   ${new Date(c.timestamp).toLocaleString()}\r\n\r\n`
+                  out += `    ${c.message}\r\n\r\n`
+                })
+              }
+              terminal.write(out + "$ ")
+              command = ""
+              cursorPos = 0
+              return
+            }
+
+            if (gitSub.startsWith("commit")) {
+              const msgMatch = gitSub.match(/-m\s+["']?(.*?)["']?$/)
+              const msg = msgMatch ? msgMatch[1] : "Commit from terminal"
+              setGitCommitMessage(msg)
+              setTimeout(() => {
+                handleCommit({ preventDefault: () => {} })
+                terminal.write(`\r\n\u001B[32m[main ${crypto.randomUUID().substring(0, 7)}] ${msg}\u001B[0m\r\n$ `)
+              }, 50)
+              command = ""
+              cursorPos = 0
+              return
+            }
           }
 
           if (trimmed.startsWith("open ") || trimmed.startsWith("code ")) {
@@ -5339,6 +5638,50 @@ function App() {
                     </div>
 
                     <div className="flex items-center gap-1">
+                      {activeBottomTab === "terminal" && (
+                        <>
+                          <button
+                            type="button"
+                            className="terminal-action-btn text-[#3fb950] hover:text-[#56d364]"
+                            title="Run Active File (Ctrl+Enter / F5)"
+                            onClick={() => handleRunCode(activeFile)}
+                          >
+                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                              <polygon points="5 3 19 12 5 21 5 3" />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            className="terminal-action-btn text-[#f85149] hover:text-[#ff7b72]"
+                            title="Interrupt Running Process (Ctrl+C)"
+                            onClick={() => {
+                              if (terminalSocketRef.current && terminalSocketRef.current.readyState === WebSocket.OPEN) {
+                                terminalSocketRef.current.send("\u0003")
+                              }
+                              terminalRef.current?.write("^C\r\n$ ")
+                              setIsRunning(false)
+                            }}
+                          >
+                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                              <rect x="6" y="6" width="12" height="12" rx="1" />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            className="terminal-action-btn"
+                            title="Clear Terminal (Ctrl+L)"
+                            onClick={() => {
+                              terminalRef.current?.write("\u001B[2J\u001B[H$ ")
+                            }}
+                          >
+                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <circle cx="12" cy="12" r="9" />
+                              <line x1="5.7" y1="5.7" x2="18.3" y2="18.3" />
+                            </svg>
+                          </button>
+                        </>
+                      )}
+
                       {activeBottomTab === "output" && (
                         <button
                           type="button"
@@ -5804,6 +6147,17 @@ function App() {
                   <div className="context-menu-divider" />
                   <div
                     className="context-menu-item"
+                    onClick={() => {
+                      setTerminalOpen(true)
+                      setActiveBottomTab("terminal")
+                      setContextMenu(null)
+                    }}
+                  >
+                    <span>⌨</span>
+                    <span>Open in Integrated Terminal</span>
+                  </div>
+                  <div
+                    className="context-menu-item"
                     onClick={() => handleCopyPath(contextMenu.target)}
                   >
                     <span>📋</span>
@@ -5821,6 +6175,16 @@ function App() {
                   >
                     <span>📂</span>
                     <span>Open File</span>
+                  </div>
+                  <div
+                    className="context-menu-item"
+                    onClick={() => {
+                      handleRunCode(contextMenu.target)
+                      setContextMenu(null)
+                    }}
+                  >
+                    <span>▶</span>
+                    <span>Run in Terminal</span>
                   </div>
                   <div
                     className="context-menu-item"
@@ -5864,6 +6228,17 @@ function App() {
                     </>
                   )}
                   <div className="context-menu-divider" />
+                  <div
+                    className="context-menu-item"
+                    onClick={() => {
+                      setTerminalOpen(true)
+                      setActiveBottomTab("terminal")
+                      setContextMenu(null)
+                    }}
+                  >
+                    <span>⌨</span>
+                    <span>Open in Integrated Terminal</span>
+                  </div>
                   <div
                     className="context-menu-item"
                     onClick={() => handleCopyPath(contextMenu.target)}
