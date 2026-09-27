@@ -3851,10 +3851,10 @@ function App() {
         <div className="w-full max-w-sm bg-[#161b22] border border-[#30363d] rounded-md shadow-lg">
           {/* Header */}
           <div className="flex items-center gap-2 px-5 pt-5 pb-4 border-b border-[#21262d]">
-            <svg className="w-4 h-4 text-[#58a6ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg aria-hidden="true" className="w-4 h-4 text-[#58a6ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
             </svg>
-            <span className="text-sm font-semibold text-[#f0f6fc] tracking-tight">SyncStream</span>
+            <h1 className="text-sm font-semibold text-[#f0f6fc] tracking-tight">SyncStream</h1>
             <span className="ml-auto text-[11px] text-[#6e7681]">Collaborative IDE</span>
           </div>
 

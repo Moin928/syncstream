@@ -2,14 +2,33 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>SyncStream - Real-Time Collaborative Cloud IDE</title>
+    <meta
+      name="description"
+      content="SyncStream is a high-performance real-time collaborative code editor and cloud workspace featuring Monaco Editor, integrated terminal, and instant room sharing."
+    />
+    <meta name="theme-color" content="#0d1117" />
+    <meta name="color-scheme" content="dark" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>SyncStream</title>
+    <meta name="apple-mobile-web-app-title" content="SyncStream" />
+
+    <!-- OpenGraph & Social Cards -->
+    <meta property="og:title" content="SyncStream - Real-Time Collaborative Cloud IDE" />
+    <meta property="og:description" content="Collaborate on code in real time with integrated terminal and multi-language support." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="SyncStream - Real-Time Collaborative Cloud IDE" />
+    <meta name="twitter:description" content="Collaborate on code in real time with integrated terminal and multi-language support." />
+
+    <!-- Icons & Manifest -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.json" />
   </head>
-  <body>
+  <body class="bg-[#090d13] text-[#c9d1d9] antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

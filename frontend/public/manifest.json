@@ -1,0 +1,17 @@
+{
+  "name": "SyncStream - Collaborative Cloud IDE",
+  "short_name": "SyncStream",
+  "description": "Real-time collaborative code editor and workspace with Monaco and integrated terminal",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090d13",
+  "theme_color": "#0d1117",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
