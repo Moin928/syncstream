@@ -3842,54 +3842,53 @@ function App() {
 
     return (
       <main className="h-screen w-full bg-[#090d13] flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-[#161b22] border border-[#30363d] rounded-xl p-6 shadow-2xl">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <svg className="w-6 h-6 text-[#58a6ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <div className="w-full max-w-sm bg-[#161b22] border border-[#30363d] rounded-md shadow-lg">
+          {/* Header */}
+          <div className="flex items-center gap-2 px-5 pt-5 pb-4 border-b border-[#21262d]">
+            <svg className="w-4 h-4 text-[#58a6ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
             </svg>
-            <h1 className="text-xl font-bold text-[#f0f6fc]">SyncStream</h1>
+            <span className="text-sm font-semibold text-[#f0f6fc] tracking-tight">SyncStream</span>
+            <span className="ml-auto text-[11px] text-[#6e7681]">Collaborative IDE</span>
           </div>
-
-          <p className="text-[#8b949e] text-center mb-4 text-xs">
-            Real-time collaborative code editor & workspace
-          </p>
 
           {/* User Auth Banner */}
           {isAuthenticated && user ? (
-            <div className="flex items-center justify-between p-2.5 mb-4 rounded-lg bg-[#0d1117] border border-[#30363d]">
+            <div className="flex items-center justify-between px-5 py-2.5 border-b border-[#21262d] bg-[#0d1117]">
               <div className="flex items-center gap-2 min-w-0">
-                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#1f6feb] to-[#58a6ff] text-white flex items-center justify-center text-[11px] font-bold flex-shrink-0">
-                  {(user.displayName || user.username).slice(0, 2).toUpperCase()}
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-xs font-semibold text-[#f0f6fc] truncate">{user.displayName || user.username}</span>
-                  <span className="text-[10px] text-[#8b949e] font-mono truncate">@{user.username}</span>
-                </div>
+                <span
+                  className="w-5 h-5 rounded flex-shrink-0 flex items-center justify-center text-[10px] font-bold text-[#0d1117]"
+                  style={{ backgroundColor: "#388bfd" }}
+                >
+                  {(user.displayName || user.username).slice(0, 1).toUpperCase()}
+                </span>
+                <span className="text-xs text-[#c9d1d9] truncate">{user.displayName || user.username}</span>
+                <span className="text-[11px] text-[#6e7681] font-mono truncate">@{user.username}</span>
               </div>
               <button
                 type="button"
                 onClick={logout}
-                className="text-[11px] text-[#f85149] hover:underline cursor-pointer flex-shrink-0 ml-2"
+                className="text-[11px] text-[#f85149] hover:underline cursor-pointer flex-shrink-0 ml-3"
               >
-                Sign Out
+                Sign out
               </button>
             </div>
           ) : (
-            <div className="flex items-center justify-between p-2.5 mb-4 rounded-lg bg-[#0d1117] border border-[#30363d]">
-              <span className="text-xs text-[#8b949e]">Have an account?</span>
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between px-5 py-2.5 border-b border-[#21262d] bg-[#0d1117]">
+              <span className="text-[11px] text-[#6e7681]">Rooms will not persist without account</span>
+              <div className="flex items-center gap-2 ml-3 flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => { setAuthModalMode("signin"); setAuthModalOpen(true); }}
-                  className="text-xs text-[#58a6ff] hover:underline font-semibold cursor-pointer"
+                  className="text-[11px] text-[#58a6ff] hover:underline cursor-pointer font-medium"
                 >
-                  Sign In
+                  Sign in
                 </button>
-                <span className="text-[#30363d]">•</span>
+                <span className="text-[#30363d] text-[11px]">/</span>
                 <button
                   type="button"
                   onClick={() => { setAuthModalMode("signup"); setAuthModalOpen(true); }}
-                  className="text-xs text-[#2ea043] hover:underline font-semibold cursor-pointer"
+                  className="text-[11px] text-[#c9d1d9] hover:text-[#f0f6fc] hover:underline cursor-pointer"
                 >
                   Register
                 </button>
@@ -3897,104 +3896,125 @@ function App() {
             </div>
           )}
 
-          {hasRoomFromUrl ? (
-            <form onSubmit={handleJoin} className="flex flex-col gap-3">
-              <div className="p-2.5 rounded bg-[#0d1117] border border-[#30363d] text-[#8b949e] text-xs">
-                Room: <span className="text-[#58a6ff] font-mono font-medium">{room}</span>
-              </div>
-
-              <input
-                type="text"
-                name="username"
-                defaultValue={defaultName}
-                placeholder="Username"
-                className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-sm outline-none border border-[#30363d] focus:border-[#58a6ff]"
-                required
-              />
-
-              {joinError && (
-                <div className="p-2 rounded bg-[#f851491a] border border-[#f8514966] text-[#f85149] text-xs">
-                  {joinError}
+          {/* Forms */}
+          <div className="px-5 py-5 flex flex-col gap-5">
+            {hasRoomFromUrl ? (
+              <form onSubmit={handleJoin} className="flex flex-col gap-4">
+                <div>
+                  <p className="text-[11px] text-[#6e7681] mb-1">Joining room</p>
+                  <p className="text-xs font-mono text-[#58a6ff] bg-[#0d1117] border border-[#30363d] rounded px-2.5 py-1.5 truncate">{room}</p>
                 </div>
-              )}
 
-              <button
-                type="submit"
-                disabled={joinLoading}
-                className="p-2.5 rounded bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-semibold disabled:opacity-50 transition cursor-pointer"
-              >
-                {joinLoading ? "Joining..." : "Join Room"}
-              </button>
-            </form>
-          ) : (
-            <>
-              <form onSubmit={handleCreateRoom} className="flex flex-col gap-3">
-                <input
-                  type="text"
-                  name="username"
-                  defaultValue={defaultName}
-                  placeholder="Username"
-                  className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-sm outline-none border border-[#30363d] focus:border-[#58a6ff]"
-                  required
-                />
-
-                {createError && (
-                  <div className="p-2 rounded bg-[#f851491a] border border-[#f8514966] text-[#f85149] text-xs">
-                    {createError}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={createLoading}
-                  className="p-2.5 rounded bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-semibold disabled:opacity-50 transition cursor-pointer"
-                >
-                  {createLoading ? "Creating Room..." : "Create New Room"}
-                </button>
-              </form>
-
-              <div className="flex items-center gap-3 my-4">
-                <div className="h-px bg-[#30363d] flex-1" />
-                <span className="text-[#8b949e] text-[10px] uppercase font-semibold">
-                  OR
-                </span>
-                <div className="h-px bg-[#30363d] flex-1" />
-              </div>
-
-              <form onSubmit={handleJoin} className="flex flex-col gap-3">
-                <input
-                  type="text"
-                  name="room"
-                  placeholder="Room ID"
-                  className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-sm outline-none border border-[#30363d] focus:border-[#58a6ff] font-mono"
-                  required
-                />
-
-                <input
-                  type="text"
-                  name="username"
-                  defaultValue={defaultName}
-                  placeholder="Username"
-                  className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-sm outline-none border border-[#30363d] focus:border-[#58a6ff]"
-                  required
-                />
+                <div className="flex flex-col gap-1">
+                  <label htmlFor="lby-username" className="text-xs font-medium text-[#c9d1d9]">Your name</label>
+                  <input
+                    id="lby-username"
+                    type="text"
+                    name="username"
+                    defaultValue={defaultName}
+                    placeholder="What should others call you?"
+                    className="px-3 py-2 rounded bg-[#0d1117] text-[#f0f6fc] text-xs border border-[#30363d] focus:border-[#58a6ff] focus:outline-none placeholder:text-[#484f58] transition-colors"
+                    required
+                  />
+                </div>
 
                 {joinError && (
-                  <div className="p-2 rounded bg-[#f851491a] border border-[#f8514966] text-[#f85149] text-xs">
-                    {joinError}
+                  <div className="border-l-2 border-[#f85149] pl-3 py-0.5">
+                    <p className="text-xs text-[#f85149]">{joinError}</p>
                   </div>
                 )}
 
                 <button
                   type="submit"
                   disabled={joinLoading}
-                  className="p-2.5 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs font-semibold disabled:opacity-50 border border-[#30363d] transition cursor-pointer"
+                  className="py-2 px-4 rounded bg-[#238636] hover:bg-[#2ea043] disabled:opacity-50 text-white text-xs font-medium transition-colors cursor-pointer"
                 >
-                  {joinLoading ? "Joining..." : "Join Room"}
+                  {joinLoading ? "Joining..." : "Join room"}
                 </button>
               </form>
-            </>
-          )}
+            ) : (
+              <>
+                <div className="flex flex-col gap-3">
+                  <p className="text-xs font-medium text-[#c9d1d9]">Create a new room</p>
+                  <form onSubmit={handleCreateRoom} className="flex flex-col gap-3">
+                    <div className="flex flex-col gap-1">
+                      <label htmlFor="lby-create-name" className="text-[11px] text-[#6e7681]">Your name</label>
+                      <input
+                        id="lby-create-name"
+                        type="text"
+                        name="username"
+                        defaultValue={defaultName}
+                        placeholder="Alex Dev"
+                        className="px-3 py-2 rounded bg-[#0d1117] text-[#f0f6fc] text-xs border border-[#30363d] focus:border-[#58a6ff] focus:outline-none placeholder:text-[#484f58] transition-colors"
+                        required
+                      />
+                    </div>
+
+                    {createError && (
+                      <div className="border-l-2 border-[#f85149] pl-3 py-0.5">
+                        <p className="text-xs text-[#f85149]">{createError}</p>
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={createLoading}
+                      className="py-2 px-4 rounded bg-[#238636] hover:bg-[#2ea043] disabled:opacity-50 text-white text-xs font-medium transition-colors cursor-pointer"
+                    >
+                      {createLoading ? "Creating..." : "Create new room"}
+                    </button>
+                  </form>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="h-px bg-[#21262d] flex-1" />
+                  <span className="text-[11px] text-[#6e7681]">or join existing</span>
+                  <div className="h-px bg-[#21262d] flex-1" />
+                </div>
+
+                <form onSubmit={handleJoin} className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-1">
+                    <label htmlFor="lby-room-id" className="text-[11px] text-[#6e7681]">Room ID</label>
+                    <input
+                      id="lby-room-id"
+                      type="text"
+                      name="room"
+                      placeholder="e.g. 550e8400-e29b-41d4"
+                      className="px-3 py-2 rounded bg-[#0d1117] text-[#f0f6fc] text-xs font-mono border border-[#30363d] focus:border-[#58a6ff] focus:outline-none placeholder:text-[#484f58] transition-colors"
+                      required
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label htmlFor="lby-join-name" className="text-[11px] text-[#6e7681]">Your name</label>
+                    <input
+                      id="lby-join-name"
+                      type="text"
+                      name="username"
+                      defaultValue={defaultName}
+                      placeholder="Alex Dev"
+                      className="px-3 py-2 rounded bg-[#0d1117] text-[#f0f6fc] text-xs border border-[#30363d] focus:border-[#58a6ff] focus:outline-none placeholder:text-[#484f58] transition-colors"
+                      required
+                    />
+                  </div>
+
+                  {joinError && (
+                    <div className="border-l-2 border-[#f85149] pl-3 py-0.5">
+                      <p className="text-xs text-[#f85149]">{joinError}</p>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={joinLoading}
+                    className="py-2 px-4 rounded border border-[#30363d] bg-[#21262d] hover:bg-[#30363d] disabled:opacity-50 text-[#c9d1d9] text-xs font-medium transition-colors cursor-pointer"
+                  >
+                    {joinLoading ? "Joining..." : "Join room"}
+                  </button>
+                </form>
+              </>
+            )}
+          </div>
         </div>
 
         <AuthModal
