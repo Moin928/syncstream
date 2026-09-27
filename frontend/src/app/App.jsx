@@ -20,6 +20,7 @@ import { registerCompletionProviders } from "../completions"
 import { useAuth } from "../auth/AuthContext"
 import { AuthModal } from "../auth/AuthModal"
 import { UserMenu } from "../auth/UserMenu"
+import { HomePage } from "../pages/HomePage"
 
 function getLanguageFromFileName(filename) {
   if (!filename) return "javascript"
@@ -448,6 +449,14 @@ function App() {
     const params = new URLSearchParams(window.location.search)
     return Boolean(params.get("room") && params.get("username"))
   })
+
+  // showLobby: show lobby card (vs landing home page).
+  // True by default when URL already has ?room= so direct share links skip home.
+  const [showLobby, setShowLobby] = useState(() => {
+    return Boolean(new URLSearchParams(window.location.search).get("room"))
+  })
+  // lobbyFocus: which section to highlight when entering lobby from home CTA
+  const [lobbyFocus, setLobbyFocus] = useState("create") // "create" | "join"
 
   const [shareMessage, setShareMessage] = useState("")
   const [joinError, setJoinError] = useState("")
@@ -3846,8 +3855,37 @@ function App() {
     const hasRoomFromUrl = Boolean(room.trim())
     const defaultName = isAuthenticated && user ? (user.displayName || user.username) : ""
 
+    // Show landing home page when no direct room link and lobby not yet requested
+    if (!showLobby) {
+      return (
+        <>
+          <HomePage
+            onStartRoom={() => { setLobbyFocus("create"); setShowLobby(true) }}
+            onJoinRoom={() => { setLobbyFocus("join"); setShowLobby(true) }}
+          />
+          <AuthModal
+            isOpen={authModalOpen}
+            onClose={() => setAuthModalOpen(false)}
+            initialMode={authModalMode}
+          />
+        </>
+      )
+    }
+
     return (
-      <main className="h-screen w-full bg-[#090d13] flex items-center justify-center p-4">
+      <main className="h-screen w-full bg-[#090d13] flex items-center justify-center p-4 relative">
+        {/* Back to home */}
+        <button
+          type="button"
+          onClick={() => setShowLobby(false)}
+          className="absolute top-4 left-4 flex items-center gap-1.5 text-xs text-[#8b949e] hover:text-[#c9d1d9] transition-colors cursor-pointer"
+          aria-label="Back to home"
+        >
+          <svg aria-hidden="true" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          SyncStream
+        </button>
         <div className="w-full max-w-sm bg-[#161b22] border border-[#30363d] rounded-md shadow-lg">
           {/* Header */}
           <div className="flex items-center gap-2 px-5 pt-5 pb-4 border-b border-[#21262d]">
@@ -3988,6 +4026,7 @@ function App() {
                       placeholder="e.g. 550e8400-e29b-41d4"
                       className="px-3 py-2 rounded bg-[#0d1117] text-[#f0f6fc] text-xs font-mono border border-[#30363d] focus:border-[#58a6ff] focus:outline-none placeholder:text-[#484f58] transition-colors"
                       required
+                      autoFocus={lobbyFocus === "join"}
                     />
                   </div>
 
