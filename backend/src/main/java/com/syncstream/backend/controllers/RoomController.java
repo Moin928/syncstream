@@ -2,6 +2,7 @@ package com.syncstream.backend.controllers;
 
 import com.syncstream.backend.models.Room;
 import com.syncstream.backend.repositories.RoomRepository;
+import com.syncstream.backend.services.JwtTokenService;
 import com.syncstream.backend.services.RateLimitingService;
 import com.syncstream.backend.services.SecurityTokenService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -9,7 +10,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -22,19 +25,25 @@ public class RoomController {
   private final RoomRepository roomRepository;
   private final RateLimitingService rateLimitingService;
   private final SecurityTokenService securityTokenService;
+  private final JwtTokenService jwtTokenService;
 
   public RoomController(
     RoomRepository roomRepository,
     RateLimitingService rateLimitingService,
-    SecurityTokenService securityTokenService
+    SecurityTokenService securityTokenService,
+    JwtTokenService jwtTokenService
   ) {
     this.roomRepository = roomRepository;
     this.rateLimitingService = rateLimitingService;
     this.securityTokenService = securityTokenService;
+    this.jwtTokenService = jwtTokenService;
   }
 
   @PostMapping
-  public ResponseEntity<String> createRoom(HttpServletRequest request) {
+  public ResponseEntity<String> createRoom(
+    @RequestHeader(value = "Authorization", required = false) String authHeader,
+    HttpServletRequest request
+  ) {
     String clientIp = getClientIp(request);
 
     // Rate limit: max 15 room creations per minute per IP
@@ -44,9 +53,22 @@ public class RoomController {
         .body("Rate limit exceeded. Please wait a moment before creating another room.");
     }
 
+    String ownerId = null;
+    boolean isGuest = true;
+
+    // Check if user is authenticated with a valid JWT
+    if (authHeader != null && authHeader.startsWith("Bearer ")) {
+      String token = authHeader.substring(7).trim();
+      var claimsOpt = jwtTokenService.validateAndParseToken(token);
+      if (claimsOpt.isPresent()) {
+        ownerId = claimsOpt.get().userId();
+        isGuest = false;
+      }
+    }
+
     // Generates a cryptographically secure UUID for the new room
     String roomId = UUID.randomUUID().toString();
-    Room room = new Room(roomId);
+    Room room = new Room(roomId, ownerId, isGuest);
     roomRepository.save(room);
 
     return ResponseEntity
@@ -55,7 +77,7 @@ public class RoomController {
   }
 
   @GetMapping("/{roomId}")
-  public ResponseEntity<Void> checkRoom(
+  public ResponseEntity<?> checkRoom(
     @PathVariable String roomId,
     HttpServletRequest request
   ) {
@@ -75,14 +97,48 @@ public class RoomController {
         .build();
     }
 
-    // Checks whether the requested room exists in the database
-    if (!roomRepository.existsById(roomId)) {
+    Optional<Room> optionalRoom = roomRepository.findById(roomId);
+    if (optionalRoom.isEmpty()) {
       return ResponseEntity
         .notFound()
         .build();
     }
 
-    return ResponseEntity.ok().build();
+    Room room = optionalRoom.get();
+    return ResponseEntity.ok(Map.of(
+      "roomId", room.getId(),
+      "isGuest", room.isGuest(),
+      "createdAt", room.getCreatedAt().toString()
+    ));
+  }
+
+  /**
+   * Returns all persistent rooms owned by the authenticated user.
+   */
+  @GetMapping("/my-rooms")
+  public ResponseEntity<?> getMyRooms(
+    @RequestHeader(value = "Authorization", required = false) String authHeader
+  ) {
+    if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+      return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Unauthorized");
+    }
+
+    String token = authHeader.substring(7).trim();
+    var claimsOpt = jwtTokenService.validateAndParseToken(token);
+    if (claimsOpt.isEmpty()) {
+      return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid token");
+    }
+
+    String userId = claimsOpt.get().userId();
+    List<Room> rooms = roomRepository.findByOwnerIdOrderByUpdatedAtDesc(userId);
+
+    List<Map<String, Object>> response = rooms.stream().map(r -> Map.<String, Object>of(
+      "roomId", r.getId(),
+      "createdAt", r.getCreatedAt().toString(),
+      "updatedAt", r.getUpdatedAt().toString()
+    )).toList();
+
+    return ResponseEntity.ok(response);
   }
 
   /**

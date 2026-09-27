@@ -6,14 +6,19 @@ import com.syncstream.backend.models.RoomUpdate;
 import com.syncstream.backend.repositories.RoomDocumentRepository;
 import com.syncstream.backend.repositories.RoomRepository;
 import com.syncstream.backend.repositories.RoomUpdateRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
 @Service
 public class RoomPersistenceService {
+
+  private static final Logger logger = LoggerFactory.getLogger(RoomPersistenceService.class);
 
   public record RecoveryState(
     byte[] snapshotData,
@@ -37,82 +42,41 @@ public class RoomPersistenceService {
 
   @Transactional
   public Room getOrCreateRoom(String roomId) {
-    // creates the room only when it does not already exist
     return roomRepository
       .findById(roomId)
-      .orElseGet(() ->
-        roomRepository.save(
-          new Room(roomId)
-        )
-      );
+      .orElseGet(() -> roomRepository.save(new Room(roomId)));
   }
 
   @Transactional
-  public long saveUpdate(
-    String roomId,
-    byte[] update
-  ) {
-    // stores each update so it can be used later for recovery
-    Room room =
-      getOrCreateRoom(roomId);
+  public long saveUpdate(String roomId, byte[] update) {
+    Room room = getOrCreateRoom(roomId);
+    room.updateTimestamp();
 
-    RoomUpdate roomUpdate =
-      new RoomUpdate(
-        room,
-        update
-      );
-
-    RoomUpdate savedUpdate =
-      roomUpdateRepository.save(
-        roomUpdate
-      );
+    RoomUpdate roomUpdate = new RoomUpdate(room, update);
+    RoomUpdate savedUpdate = roomUpdateRepository.save(roomUpdate);
 
     return savedUpdate.getId();
   }
 
   @Transactional
-  public void saveSnapshot(
-    String roomId,
-    byte[] snapshotData,
-    long snapshotUpdateId
-  ) {
-    // saves the latest document snapshot and removes older updates
-    Room room =
-      getOrCreateRoom(roomId);
+  public void saveSnapshot(String roomId, byte[] snapshotData, long snapshotUpdateId) {
+    Room room = getOrCreateRoom(roomId);
+    room.updateTimestamp();
 
-    Optional<RoomDocument> existingDocument =
-      roomDocumentRepository.findById(roomId);
+    Optional<RoomDocument> existingDocument = roomDocumentRepository.findById(roomId);
 
     if (existingDocument.isPresent()) {
-      existingDocument
-        .get()
-        .updateSnapshot(
-          snapshotData,
-          snapshotUpdateId
-        );
+      existingDocument.get().updateSnapshot(snapshotData, snapshotUpdateId);
     } else {
-      RoomDocument document =
-        new RoomDocument(
-          room,
-          snapshotData,
-          snapshotUpdateId
-        );
-
+      RoomDocument document = new RoomDocument(room, snapshotData, snapshotUpdateId);
       roomDocumentRepository.save(document);
     }
 
-    roomUpdateRepository
-      .deleteByRoomIdAndIdLessThanEqual(
-        roomId,
-        snapshotUpdateId
-      );
+    roomUpdateRepository.deleteByRoomIdAndIdLessThanEqual(roomId, snapshotUpdateId);
   }
 
   @Transactional(readOnly = true)
-  public long getLatestUpdateId(
-    String roomId
-  ) {
-    // gets the latest update id without changing anything in the database
+  public long getLatestUpdateId(String roomId) {
     return roomUpdateRepository
       .findTopByRoomIdOrderByIdDesc(roomId)
       .map(RoomUpdate::getId)
@@ -120,32 +84,20 @@ public class RoomPersistenceService {
   }
 
   @Transactional(readOnly = true)
-  public RecoveryState loadRecoveryState(
-    String roomId
-  ) {
-    // loads the snapshot and any updates that came after it
-    Optional<RoomDocument> snapshot =
-      roomDocumentRepository.findById(roomId);
+  public RecoveryState loadRecoveryState(String roomId) {
+    Optional<RoomDocument> snapshot = roomDocumentRepository.findById(roomId);
 
     if (snapshot.isEmpty()) {
-      // if there is no snapshot, all stored updates are needed for recovery
       return new RecoveryState(
         null,
         0L,
-        roomUpdateRepository
-          .findByRoomIdOrderByIdAsc(roomId)
+        roomUpdateRepository.findByRoomIdOrderByIdAsc(roomId)
       );
     }
 
-    RoomDocument document =
-      snapshot.get();
-
-    List<RoomUpdate> updates =
-      roomUpdateRepository
-        .findByRoomIdAndIdGreaterThanOrderByIdAsc(
-          roomId,
-          document.getSnapshotUpdateId()
-        );
+    RoomDocument document = snapshot.get();
+    List<RoomUpdate> updates = roomUpdateRepository
+      .findByRoomIdAndIdGreaterThanOrderByIdAsc(roomId, document.getSnapshotUpdateId());
 
     return new RecoveryState(
       document.getSnapshotData(),
@@ -154,4 +106,41 @@ public class RoomPersistenceService {
     );
   }
 
+  @Transactional(readOnly = true)
+  public boolean isGuestRoom(String roomId) {
+    return roomRepository.findById(roomId)
+      .map(Room::isGuest)
+      .orElse(true);
+  }
+
+  /**
+   * Permanently deletes a room and all associated documents and update histories.
+   * Used for ephemeral guest rooms when all users leave.
+   */
+  @Transactional
+  public void deleteRoom(String roomId) {
+    try {
+      roomDocumentRepository.deleteByRoomId(roomId);
+      roomUpdateRepository.deleteByRoomId(roomId);
+      roomRepository.deleteById(roomId);
+      logger.info("Deleted ephemeral guest room and all stored state: {}", roomId);
+    } catch (Exception e) {
+      logger.error("Error deleting ephemeral room: {}", roomId, e);
+    }
+  }
+
+  /**
+   * Batch deletes expired guest rooms and their updates.
+   */
+  @Transactional
+  public void cleanupExpiredGuestRooms(Instant cutoff) {
+    try {
+      roomDocumentRepository.deleteDocumentsForExpiredGuestRooms(cutoff);
+      roomUpdateRepository.deleteUpdatesForExpiredGuestRooms(cutoff);
+      roomRepository.deleteExpiredGuestRooms(cutoff);
+      logger.info("Cleaned up inactive guest rooms older than: {}", cutoff);
+    } catch (Exception e) {
+      logger.error("Error during scheduled guest room cleanup", e);
+    }
+  }
 }

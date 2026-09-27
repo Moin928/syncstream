@@ -153,6 +153,11 @@ public class WebSocketRoomManager {
         rooms.remove(room);
         roomStates.remove(room);
         roomUsers.remove(room);
+
+        // If this is an unauthenticated guest room, wipe it immediately upon all users leaving
+        if (persistenceService.isGuestRoom(room)) {
+          persistenceService.deleteRoom(room);
+        }
       }
     }
   }

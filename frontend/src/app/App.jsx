@@ -3443,8 +3443,14 @@ function App() {
     }
 
     try {
+      const headers = {}
+      if (authToken) {
+        headers["Authorization"] = `Bearer ${authToken}`
+      }
+
       const response = await fetch("http://localhost:8080/api/rooms", {
-        method: "POST"
+        method: "POST",
+        headers
       })
 
       if (!response.ok) {
