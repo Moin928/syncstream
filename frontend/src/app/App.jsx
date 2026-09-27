@@ -17,7 +17,9 @@ import {
 } from "../diagnostics"
 import { formatDocument } from "../formatting"
 import { registerCompletionProviders } from "../completions"
-import { renderMarkdown } from "../markdown"
+import { useAuth } from "../auth/AuthContext"
+import { AuthModal } from "../auth/AuthModal"
+import { UserMenu } from "../auth/UserMenu"
 
 function getLanguageFromFileName(filename) {
   if (!filename) return "javascript"
@@ -353,6 +355,10 @@ function App() {
   const remoteCursorWidgetsRef = useRef(new Map())
   const remoteSelectionsRef = useRef(new Map())
 
+  const { user, token: authToken, isAuthenticated, logout } = useAuth()
+  const [authModalOpen, setAuthModalOpen] = useState(false)
+  const [authModalMode, setAuthModalMode] = useState("signin")
+
   const [username, setUsername] = useState(() => {
     return (
       new URLSearchParams(
@@ -360,6 +366,12 @@ function App() {
       ).get("username") || ""
     )
   })
+
+  useEffect(() => {
+    if (user && !username) {
+      setUsername(user.displayName || user.username)
+    }
+  }, [user, username])
 
   const [users, setUsers] = useState([])
 
@@ -1182,7 +1194,7 @@ function App() {
         setDocumentReady(true)
       },
       new URLSearchParams(window.location.search).get("role") || "editor",
-      new URLSearchParams(window.location.search).get("token") || ""
+      authToken || new URLSearchParams(window.location.search).get("token") || ""
     )
 
     providerRef.current = provider
@@ -1208,7 +1220,7 @@ function App() {
       remoteCursorWidgetsRef.current.clear()
       remoteSelectionsRef.current.clear()
     }
-  }, [joined, username, room, ydoc])
+  }, [joined, username, room, ydoc, authToken])
 
   /*
    * Shared language metadata.
@@ -1300,8 +1312,8 @@ function App() {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
     const clientId = providerRef.current?.clientId || ""
     const urlRole = new URLSearchParams(window.location.search).get("role") || myRole || "editor"
-    const urlToken = new URLSearchParams(window.location.search).get("token") || ""
-    const tokenQuery = urlToken ? `&token=${encodeURIComponent(urlToken)}` : ""
+    const effectiveToken = authToken || new URLSearchParams(window.location.search).get("token") || ""
+    const tokenQuery = effectiveToken ? `&token=${encodeURIComponent(effectiveToken)}` : ""
     const socket = new WebSocket(
       `${protocol}//${window.location.hostname}:8080/ws/terminal?room=${encodeURIComponent(
         room
@@ -3826,10 +3838,11 @@ function App() {
    */
   if (!joined) {
     const hasRoomFromUrl = Boolean(room.trim())
+    const defaultName = isAuthenticated && user ? (user.displayName || user.username) : ""
 
     return (
       <main className="h-screen w-full bg-[#090d13] flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-[#161b22] border border-[#30363d] rounded-lg p-6 shadow-xl">
+        <div className="w-full max-w-sm bg-[#161b22] border border-[#30363d] rounded-xl p-6 shadow-2xl">
           <div className="flex items-center justify-center gap-2 mb-2">
             <svg className="w-6 h-6 text-[#58a6ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
@@ -3837,9 +3850,52 @@ function App() {
             <h1 className="text-xl font-bold text-[#f0f6fc]">SyncStream</h1>
           </div>
 
-          <p className="text-[#8b949e] text-center mb-6 text-xs">
+          <p className="text-[#8b949e] text-center mb-4 text-xs">
             Real-time collaborative code editor & workspace
           </p>
+
+          {/* User Auth Banner */}
+          {isAuthenticated && user ? (
+            <div className="flex items-center justify-between p-2.5 mb-4 rounded-lg bg-[#0d1117] border border-[#30363d]">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#1f6feb] to-[#58a6ff] text-white flex items-center justify-center text-[11px] font-bold flex-shrink-0">
+                  {(user.displayName || user.username).slice(0, 2).toUpperCase()}
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-semibold text-[#f0f6fc] truncate">{user.displayName || user.username}</span>
+                  <span className="text-[10px] text-[#8b949e] font-mono truncate">@{user.username}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={logout}
+                className="text-[11px] text-[#f85149] hover:underline cursor-pointer flex-shrink-0 ml-2"
+              >
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between p-2.5 mb-4 rounded-lg bg-[#0d1117] border border-[#30363d]">
+              <span className="text-xs text-[#8b949e]">Have an account?</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setAuthModalMode("signin"); setAuthModalOpen(true); }}
+                  className="text-xs text-[#58a6ff] hover:underline font-semibold cursor-pointer"
+                >
+                  Sign In
+                </button>
+                <span className="text-[#30363d]">•</span>
+                <button
+                  type="button"
+                  onClick={() => { setAuthModalMode("signup"); setAuthModalOpen(true); }}
+                  className="text-xs text-[#2ea043] hover:underline font-semibold cursor-pointer"
+                >
+                  Register
+                </button>
+              </div>
+            </div>
+          )}
 
           {hasRoomFromUrl ? (
             <form onSubmit={handleJoin} className="flex flex-col gap-3">
@@ -3850,6 +3906,7 @@ function App() {
               <input
                 type="text"
                 name="username"
+                defaultValue={defaultName}
                 placeholder="Username"
                 className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-sm outline-none border border-[#30363d] focus:border-[#58a6ff]"
                 required
@@ -3864,7 +3921,7 @@ function App() {
               <button
                 type="submit"
                 disabled={joinLoading}
-                className="p-2.5 rounded bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-semibold disabled:opacity-50 transition"
+                className="p-2.5 rounded bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-semibold disabled:opacity-50 transition cursor-pointer"
               >
                 {joinLoading ? "Joining..." : "Join Room"}
               </button>
@@ -3875,6 +3932,7 @@ function App() {
                 <input
                   type="text"
                   name="username"
+                  defaultValue={defaultName}
                   placeholder="Username"
                   className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-sm outline-none border border-[#30363d] focus:border-[#58a6ff]"
                   required
@@ -3889,7 +3947,7 @@ function App() {
                 <button
                   type="submit"
                   disabled={createLoading}
-                  className="p-2.5 rounded bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-semibold disabled:opacity-50 transition"
+                  className="p-2.5 rounded bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-semibold disabled:opacity-50 transition cursor-pointer"
                 >
                   {createLoading ? "Creating Room..." : "Create New Room"}
                 </button>
@@ -3915,6 +3973,7 @@ function App() {
                 <input
                   type="text"
                   name="username"
+                  defaultValue={defaultName}
                   placeholder="Username"
                   className="p-2.5 rounded bg-[#0d1117] text-[#c9d1d9] text-sm outline-none border border-[#30363d] focus:border-[#58a6ff]"
                   required
@@ -3929,7 +3988,7 @@ function App() {
                 <button
                   type="submit"
                   disabled={joinLoading}
-                  className="p-2.5 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs font-semibold disabled:opacity-50 border border-[#30363d] transition"
+                  className="p-2.5 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs font-semibold disabled:opacity-50 border border-[#30363d] transition cursor-pointer"
                 >
                   {joinLoading ? "Joining..." : "Join Room"}
                 </button>
@@ -3937,6 +3996,12 @@ function App() {
             </>
           )}
         </div>
+
+        <AuthModal
+          isOpen={authModalOpen}
+          onClose={() => setAuthModalOpen(false)}
+          initialMode={authModalMode}
+        />
       </main>
     )
   }
@@ -4152,10 +4217,12 @@ function App() {
             <span className={`role-badge role-badge-${myRole}`}>{myRole}</span>
           </div>
 
+          <UserMenu onOpenAuthModal={(m) => { setAuthModalMode(m); setAuthModalOpen(true); }} />
+
           <button
             type="button"
             onClick={handleShareRoom}
-            className="px-2.5 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition"
+            className="px-2.5 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] text-xs border border-[#30363d] transition cursor-pointer"
           >
             Share
           </button>
@@ -6581,6 +6648,12 @@ function App() {
           <span>Users</span>
         </button>
       </nav>
+
+      <AuthModal
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        initialMode={authModalMode}
+      />
 
     </main>
   )

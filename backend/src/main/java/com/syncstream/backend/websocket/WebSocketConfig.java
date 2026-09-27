@@ -1,5 +1,6 @@
 package com.syncstream.backend.websocket;
 
+import com.syncstream.backend.services.JwtTokenService;
 import com.syncstream.backend.services.SecurityTokenService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -26,6 +27,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
   private final CodeWebSocketHandler codeWebSocketHandler;
   private final TerminalWebSocketHandler terminalWebSocketHandler;
   private final SecurityTokenService securityTokenService;
+  private final JwtTokenService jwtTokenService;
 
   /**
    * Allowed origin patterns, configurable via environment/application.properties.
@@ -37,11 +39,13 @@ public class WebSocketConfig implements WebSocketConfigurer {
   public WebSocketConfig(
     CodeWebSocketHandler codeWebSocketHandler,
     TerminalWebSocketHandler terminalWebSocketHandler,
-    SecurityTokenService securityTokenService
+    SecurityTokenService securityTokenService,
+    JwtTokenService jwtTokenService
   ) {
     this.codeWebSocketHandler = codeWebSocketHandler;
     this.terminalWebSocketHandler = terminalWebSocketHandler;
     this.securityTokenService = securityTokenService;
+    this.jwtTokenService = jwtTokenService;
   }
 
   @Override
@@ -50,12 +54,12 @@ public class WebSocketConfig implements WebSocketConfigurer {
 
     registry
       .addHandler(codeWebSocketHandler, "/ws")
-      .addInterceptors(new RoomHandshakeInterceptor(securityTokenService))
+      .addInterceptors(new RoomHandshakeInterceptor(securityTokenService, jwtTokenService))
       .setAllowedOrigins(origins);
 
     registry
       .addHandler(terminalWebSocketHandler, "/ws/terminal")
-      .addInterceptors(new RoomHandshakeInterceptor(securityTokenService))
+      .addInterceptors(new RoomHandshakeInterceptor(securityTokenService, jwtTokenService))
       .setAllowedOrigins(origins);
   }
 

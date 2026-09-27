@@ -1,5 +1,6 @@
 package com.syncstream.backend.websocket;
 
+import com.syncstream.backend.services.JwtTokenService;
 import com.syncstream.backend.services.SecurityTokenService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,8 +25,9 @@ import java.util.regex.Pattern;
  *   <li>Values are URL-decoded using UTF-8 before validation.</li>
  *   <li>{@code clientId} must be a valid UUID (RFC 4122 format).</li>
  *   <li>{@code room} must be alphanumeric with optional hyphens, 1–64 chars.</li>
+ *   <li>JWT user authentication is validated if {@code authToken} or {@code token} is a user JWT.</li>
  *   <li>{@code role} is cryptographically verified via HMAC-SHA256 {@code token} for privileged roles (owner, admin).</li>
- *   <li>{@code username} is validated and sanitized (if provided).</li>
+ *   <li>{@code username} is validated and sanitized (if unauthenticated).</li>
  *   <li>Any parameter that fails structural validation closes the handshake immediately.</li>
  * </ul>
  */
@@ -52,9 +54,14 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
   );
 
   private final SecurityTokenService securityTokenService;
+  private final JwtTokenService jwtTokenService;
 
-  public RoomHandshakeInterceptor(SecurityTokenService securityTokenService) {
+  public RoomHandshakeInterceptor(
+    SecurityTokenService securityTokenService,
+    JwtTokenService jwtTokenService
+  ) {
     this.securityTokenService = securityTokenService;
+    this.jwtTokenService = jwtTokenService;
   }
 
   @Override
@@ -72,11 +79,12 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
       return false;
     }
 
-    String room     = null;
-    String clientId = null;
-    String role     = "editor";
-    String token    = null;
-    String username = null;
+    String room        = null;
+    String clientId    = null;
+    String role        = "editor";
+    String token       = null;
+    String authToken   = null;
+    String username    = null;
 
     // Parse and URL-decode each parameter
     for (String parameter : query.split("&")) {
@@ -99,6 +107,7 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
             }
           }
           case "token" -> token = value;
+          case "authToken" -> authToken = value;
           case "username" -> username = sanitizeUsername(value);
           default -> {}
         }
@@ -137,10 +146,27 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
       return false;
     }
 
+    // Check user JWT authentication
+    boolean isAuthenticated = false;
+    String tokenToCheck = authToken != null ? authToken : token;
+    if (tokenToCheck != null && jwtTokenService != null) {
+      var claimsOpt = jwtTokenService.validateAndParseToken(tokenToCheck);
+      if (claimsOpt.isPresent()) {
+        var claims = claimsOpt.get();
+        isAuthenticated = true;
+        username = claims.username();
+        attributes.put("userId", claims.userId());
+        attributes.put("authenticated", true);
+        if (claims.displayName() != null) {
+          attributes.put("displayName", claims.displayName());
+        }
+      }
+    }
+
     // Cryptographic role verification: privileged roles (owner, admin) require valid HMAC token
     if (("owner".equals(role) || "admin".equals(role)) && securityTokenService != null) {
       boolean valid = securityTokenService.verifyRoleToken(room, role, token);
-      if (!valid) {
+      if (!valid && !isAuthenticated) {
         logger.warn("Unverified privileged role attempt ('{}') for room '{}' without valid HMAC token. Downgrading to editor.",
           role, sanitize(room));
         role = "editor";
@@ -151,8 +177,9 @@ public class RoomHandshakeInterceptor implements HandshakeInterceptor {
     attributes.put("room",     room);
     attributes.put("clientId", clientId);
     attributes.put("role",     role);
-    if (username != null) {
-      attributes.put("username", username);
+    attributes.put("username", username != null ? username : "User");
+    if (!attributes.containsKey("authenticated")) {
+      attributes.put("authenticated", false);
     }
 
     return true;
