@@ -6020,16 +6020,21 @@ function App() {
           <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
             <div className="settings-header">
               <div className="flex items-center gap-2">
-                <span>⚙️</span>
-                <span>Editor & Workspace Settings</span>
+                <svg className="w-4 h-4 text-[#58a6ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+                </svg>
+                <span className="text-xs font-semibold text-[#f0f6fc]">Editor Settings</span>
               </div>
               <button
                 type="button"
                 onClick={() => setSettingsModalOpen(false)}
-                className="terminal-action-btn"
+                className="w-6 h-6 flex items-center justify-center rounded text-[#6e7681] hover:text-[#c9d1d9] hover:bg-[#21262d] transition-colors"
                 title="Close Settings (Esc)"
               >
-                ✕
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
               </button>
             </div>
             <div className="settings-body">
@@ -6137,51 +6142,65 @@ function App() {
                   setContextMenu(null)
                 }}
               >
-                <span>✕</span>
-                <span>Close Tab</span>
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                <span>Close</span>
               </div>
               <div
                 className="context-menu-item"
                 onClick={() => handleCloseOtherTabs(contextMenu.target)}
               >
-                <span>⊞</span>
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
                 <span>Close Others</span>
               </div>
               <div
                 className="context-menu-item"
                 onClick={() => handleCloseTabsToRight(contextMenu.target)}
               >
-                <span>⇥</span>
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
                 <span>Close to the Right</span>
               </div>
               <div
                 className="context-menu-item"
                 onClick={() => handleCloseAllTabs()}
               >
-                <span>✕✕</span>
-                <span>Close All Tabs</span>
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                <span>Close All</span>
               </div>
               <div className="context-menu-divider" />
               <div
                 className="context-menu-item"
                 onClick={() => handleDuplicateFile(contextMenu.target)}
               >
-                <span>📄</span>
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
                 <span>Duplicate File</span>
               </div>
               <div
                 className="context-menu-item"
                 onClick={() => handleDownloadFile(contextMenu.target)}
               >
-                <span>📥</span>
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
                 <span>Download File</span>
               </div>
               <div
                 className="context-menu-item"
                 onClick={() => handleCopyPath(contextMenu.target)}
               >
-                <span>📋</span>
-                <span>Copy Relative Path</span>
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                </svg>
+                <span>Copy Path</span>
               </div>
             </>
           ) : (
@@ -6198,7 +6217,9 @@ function App() {
                           setContextMenu(null)
                         }}
                       >
-                        <span>+</span>
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                        </svg>
                         <span>New File Inside</span>
                       </div>
                       <div
@@ -6209,7 +6230,9 @@ function App() {
                           setContextMenu(null)
                         }}
                       >
-                        <span>📁</span>
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                        </svg>
                         <span>New Folder Inside</span>
                       </div>
                       <div className="context-menu-divider" />
@@ -6222,7 +6245,9 @@ function App() {
                           setContextMenu(null)
                         }}
                       >
-                        <span>✎</span>
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
                         <span>Rename Folder</span>
                       </div>
                       <div
@@ -6232,7 +6257,9 @@ function App() {
                           setContextMenu(null)
                         }}
                       >
-                        <span>🗑</span>
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
                         <span>Delete Folder</span>
                       </div>
                     </>
@@ -6246,14 +6273,18 @@ function App() {
                       setContextMenu(null)
                     }}
                   >
-                    <span>⌨</span>
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 17l6-6-6-6m8 14h8" />
+                    </svg>
                     <span>Open in Integrated Terminal</span>
                   </div>
                   <div
                     className="context-menu-item"
                     onClick={() => handleCopyPath(contextMenu.target)}
                   >
-                    <span>📋</span>
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                    </svg>
                     <span>Copy Path</span>
                   </div>
                 </>
@@ -6266,7 +6297,9 @@ function App() {
                       setContextMenu(null)
                     }}
                   >
-                    <span>📂</span>
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
+                    </svg>
                     <span>Open File</span>
                   </div>
                   <div
@@ -6276,21 +6309,27 @@ function App() {
                       setContextMenu(null)
                     }}
                   >
-                    <span>▶</span>
+                    <svg className="w-3.5 h-3.5 text-[#3fb950]" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
                     <span>Run in Terminal</span>
                   </div>
                   <div
                     className="context-menu-item"
                     onClick={() => handleDuplicateFile(contextMenu.target)}
                   >
-                    <span>📄</span>
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
                     <span>Duplicate File</span>
                   </div>
                   <div
                     className="context-menu-item"
                     onClick={() => handleDownloadFile(contextMenu.target)}
                   >
-                    <span>📥</span>
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
                     <span>Download File</span>
                   </div>
                   {!isViewer && (
@@ -6305,7 +6344,9 @@ function App() {
                           setContextMenu(null)
                         }}
                       >
-                        <span>✎</span>
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
                         <span>Rename</span>
                       </div>
                       <div
@@ -6315,7 +6356,9 @@ function App() {
                           setContextMenu(null)
                         }}
                       >
-                        <span>🗑</span>
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
                         <span>Delete File</span>
                       </div>
                     </>
@@ -6329,14 +6372,18 @@ function App() {
                       setContextMenu(null)
                     }}
                   >
-                    <span>⌨</span>
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 17l6-6-6-6m8 14h8" />
+                    </svg>
                     <span>Open in Integrated Terminal</span>
                   </div>
                   <div
                     className="context-menu-item"
                     onClick={() => handleCopyPath(contextMenu.target)}
                   >
-                    <span>📋</span>
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                    </svg>
                     <span>Copy Relative Path</span>
                   </div>
                 </>
@@ -6352,16 +6399,20 @@ function App() {
           <div className="share-modal" onClick={(e) => e.stopPropagation()}>
             <div className="share-modal-header">
               <div className="flex items-center gap-2">
-                <span>🔗</span>
-                <span>Share Workspace & Invite Collaborators</span>
+                <svg className="w-4 h-4 text-[#58a6ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                </svg>
+                <span className="text-xs font-semibold text-[#f0f6fc]">Share Workspace</span>
               </div>
               <button
                 type="button"
                 onClick={() => setShareModalOpen(false)}
-                className="terminal-action-btn"
+                className="w-6 h-6 flex items-center justify-center rounded text-[#6e7681] hover:text-[#c9d1d9] hover:bg-[#21262d] transition-colors"
                 title="Close (Esc)"
               >
-                ✕
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
               </button>
             </div>
 
@@ -6476,16 +6527,21 @@ function App() {
           <div className="shortcuts-modal" onClick={(e) => e.stopPropagation()}>
             <div className="shortcuts-modal-header">
               <div className="flex items-center gap-2">
-                <span>⌨️</span>
-                <span>Keyboard Shortcuts Reference</span>
+                <svg className="w-4 h-4 text-[#58a6ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="2" y="4" width="20" height="16" rx="2" />
+                  <path d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M6 12h.001M10 12h.001M14 12h.001M18 12h.001M7 16h10" />
+                </svg>
+                <span className="text-xs font-semibold text-[#f0f6fc]">Keyboard Shortcuts</span>
               </div>
               <button
                 type="button"
                 onClick={() => setShortcutsModalOpen(false)}
-                className="terminal-action-btn"
+                className="w-6 h-6 flex items-center justify-center rounded text-[#6e7681] hover:text-[#c9d1d9] hover:bg-[#21262d] transition-colors"
                 title="Close (Esc)"
               >
-                ✕
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
               </button>
             </div>
 

@@ -1517,8 +1517,7 @@ select {
 .palette-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.65);
   z-index: 9999;
   display: flex;
   justify-content: center;
@@ -1531,10 +1530,10 @@ select {
   max-width: 92vw;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 8px;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+  border-radius: 6px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7);
   display: flex;
-  flex-col: column;
+  flex-direction: column;
   overflow: hidden;
   animation: palette-slide-down 0.12s ease-out;
 }
@@ -1542,11 +1541,11 @@ select {
 @keyframes palette-slide-down {
   from {
     opacity: 0;
-    transform: translateY(-8px) scale(0.98);
+    transform: translateY(-6px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 
@@ -1588,7 +1587,7 @@ select {
   justify-content: space-between;
   gap: 10px;
   padding: 6px 10px;
-  border-radius: 5px;
+  border-radius: 4px;
   font-size: 12px;
   color: #c9d1d9;
   cursor: pointer;
@@ -1643,7 +1642,6 @@ select {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(3px);
   z-index: 9998;
   display: flex;
   justify-content: center;
@@ -1657,7 +1655,7 @@ select {
   max-width: 1400px;
   background: #0d1117;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.8);
   display: flex;
   flex-direction: column;
@@ -1726,7 +1724,7 @@ select {
   max-width: 90vw;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
   display: flex;
   flex-direction: column;
@@ -1775,7 +1773,7 @@ select {
   background: #0d1117;
   border: 1px solid #30363d;
   color: #c9d1d9;
-  border-radius: 5px;
+  border-radius: 4px;
   padding: 4px 8px;
   font-size: 12px;
   outline: none;
@@ -1851,7 +1849,7 @@ select {
   max-width: 92vw;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.8);
   display: flex;
   flex-direction: column;
@@ -1949,7 +1947,6 @@ select {
 .share-copy-btn {
   padding: 4px 10px;
   background: #21262d;
-  hover:bg-[#30363d];
   border: 1px solid #30363d;
   color: #c9d1d9;
   border-radius: 4px;
@@ -2015,7 +2012,7 @@ select {
   max-width: 92vw;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.8);
   display: flex;
   flex-direction: column;
