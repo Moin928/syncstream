@@ -3862,6 +3862,11 @@ function App() {
           <HomePage
             onStartRoom={() => { setLobbyFocus("create"); setShowLobby(true) }}
             onJoinRoom={() => { setLobbyFocus("join"); setShowLobby(true) }}
+            user={user}
+            isAuthenticated={isAuthenticated}
+            onSignIn={() => { setAuthModalMode("signin"); setAuthModalOpen(true) }}
+            onSignUp={() => { setAuthModalMode("signup"); setAuthModalOpen(true) }}
+            onSignOut={logout}
           />
           <AuthModal
             isOpen={authModalOpen}
