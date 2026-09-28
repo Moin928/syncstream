@@ -545,6 +545,16 @@ function App() {
   const activeFileRef = useRef(activeFile)
   const activeActivityTabRef = useRef(activeActivityTab)
 
+  const handleRunCodeRef = useRef(null)
+  const handleFormatCodeRef = useRef(null)
+  const handleToggleWordWrapRef = useRef(null)
+  const openQuickOpenRef = useRef(null)
+  const openCommandPaletteRef = useRef(null)
+  const toggleTerminalRef = useRef(null)
+  const toggleSidebarRef = useRef(null)
+  const openSearchRef = useRef(null)
+  const toggleShortcutsRef = useRef(null)
+
   useEffect(() => {
     followingUserRef.current = followingUser
   }, [followingUser])
@@ -570,6 +580,30 @@ function App() {
       }, 50)
     }
   }, [activeActivityTab])
+
+  useEffect(() => {
+    openQuickOpenRef.current = () => {
+      setPaletteMode("quickOpen")
+      setPaletteQuery("")
+      setPaletteSelectedIndex(0)
+    }
+    openCommandPaletteRef.current = () => {
+      setPaletteMode("commandPalette")
+      setPaletteQuery("")
+      setPaletteSelectedIndex(0)
+    }
+    toggleTerminalRef.current = () => setTerminalOpen((t) => !t)
+    toggleSidebarRef.current = () => setSidebarOpen((s) => !s)
+    openSearchRef.current = () => {
+      setActiveActivityTab("search")
+      setSidebarOpen(true)
+      setTimeout(() => {
+        searchInputRef.current?.focus()
+        searchInputRef.current?.select()
+      }, 50)
+    }
+    toggleShortcutsRef.current = () => setShortcutsModalOpen((prev) => !prev)
+  })
 
   /*
    * Synchronize collaborative chat messages.
@@ -2140,6 +2174,18 @@ function App() {
     setWordWrap((prev) => (prev === "on" ? "off" : "on"))
   }, [])
 
+  useEffect(() => {
+    handleRunCodeRef.current = handleRunCode
+  }, [handleRunCode])
+
+  useEffect(() => {
+    handleFormatCodeRef.current = handleFormatCode
+  }, [handleFormatCode])
+
+  useEffect(() => {
+    handleToggleWordWrapRef.current = handleToggleWordWrap
+  }, [handleToggleWordWrap])
+
   /*
    * Command Palette Available Actions & Shortcuts
    */
@@ -2383,15 +2429,22 @@ function App() {
         }
       }
 
+      // Ctrl+S : Run Diagnostics & Save
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && (event.key === "s" || event.key === "S" || event.code === "KeyS")) {
+        event.preventDefault()
+        validateCodeRef.current?.()
+        return
+      }
+
       // Ctrl+/ : Toggle Keyboard Shortcuts Cheat-Sheet
-      if ((event.ctrlKey || event.metaKey) && event.key === "/") {
+      if ((event.ctrlKey || event.metaKey) && (event.key === "/" || event.code === "Slash")) {
         event.preventDefault()
         setShortcutsModalOpen((prev) => !prev)
         return
       }
 
       // Ctrl+Shift+P or F1: Command Palette
-      if (((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === "P" || event.key === "p")) || event.key === "F1") {
+      if (((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === "P" || event.key === "p" || event.code === "KeyP")) || event.key === "F1") {
         event.preventDefault()
         setPaletteMode("commandPalette")
         setPaletteQuery("")
@@ -2400,7 +2453,7 @@ function App() {
       }
 
       // Ctrl+P: Quick Open File
-      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && (event.key === "P" || event.key === "p")) {
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && (event.key === "P" || event.key === "p" || event.code === "KeyP")) {
         event.preventDefault()
         setPaletteMode("quickOpen")
         setPaletteQuery("")
@@ -2408,8 +2461,8 @@ function App() {
         return
       }
 
-      // Global Search
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === "F" || event.key === "f")) {
+      // Global Search & Replace (Ctrl+Shift+F)
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === "F" || event.key === "f" || event.code === "KeyF")) {
         event.preventDefault()
         setActiveActivityTab("search")
         setSidebarOpen(true)
@@ -2417,24 +2470,42 @@ function App() {
           searchInputRef.current?.focus()
           searchInputRef.current?.select()
         }, 50)
-      } else if (event.shiftKey && event.altKey && (event.key === "F" || event.key === "f")) {
+        return
+      }
+
+      // Shift+Alt+F: Format Document
+      if (event.shiftKey && event.altKey && (event.key === "F" || event.key === "f" || event.code === "KeyF")) {
         event.preventDefault()
         handleFormatCode()
-      } else if (event.altKey && (event.key === "z" || event.key === "Z")) {
+        return
+      }
+
+      // Alt+Z: Toggle Word Wrap
+      if (event.altKey && !event.ctrlKey && !event.metaKey && (event.key === "z" || event.key === "Z" || event.code === "KeyZ")) {
         event.preventDefault()
         handleToggleWordWrap()
-      } else if ((event.ctrlKey || event.metaKey) && (event.key === "b" || event.key === "B")) {
+        return
+      }
+
+      // Ctrl+B: Toggle Sidebar / File Explorer
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && (event.key === "b" || event.key === "B" || event.code === "KeyB")) {
         event.preventDefault()
         setSidebarOpen((s) => !s)
-      } else if (event.ctrlKey && event.key === "`") {
+        return
+      }
+
+      // Ctrl+` : Toggle Terminal Panel
+      if ((event.ctrlKey || event.metaKey) && (event.key === "`" || event.code === "Backquote" || event.key === "~")) {
         event.preventDefault()
         setTerminalOpen((current) => !current)
-      } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        return
+      }
+
+      // Ctrl+Enter or F5: Run Code
+      if (((event.ctrlKey || event.metaKey) && event.key === "Enter") || event.key === "F5") {
         event.preventDefault()
         handleRunCode()
-      } else if (event.key === "F5") {
-        event.preventDefault()
-        handleRunCode()
+        return
       }
     }
 
@@ -2546,15 +2617,128 @@ function App() {
       }
     })
 
+    // Format Document (Shift+Alt+F)
     editor.addAction({
       id: "syncstream-format-document",
       label: "Format Document",
       keybindings: [
         monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF,
-        monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KEY_F
+        monaco.KeyMod.Shift | monaco.KeyMod.Alt | (monaco.KeyCode.KEY_F || monaco.KeyCode.KeyF)
       ],
       run: () => {
-        handleFormatCode()
+        handleFormatCodeRef.current?.()
+      }
+    })
+
+    // Run Code / Project (Ctrl+Enter / F5)
+    editor.addAction({
+      id: "syncstream-run-code",
+      label: "Run Code / Project",
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
+        monaco.KeyCode.F5
+      ],
+      run: () => {
+        handleRunCodeRef.current?.()
+      }
+    })
+
+    // Command Palette (Ctrl+Shift+P / F1)
+    editor.addAction({
+      id: "syncstream-command-palette",
+      label: "SyncStream: Command Palette",
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyP,
+        monaco.KeyCode.F1
+      ],
+      run: () => {
+        openCommandPaletteRef.current?.()
+      }
+    })
+
+    // Quick Open File (Ctrl+P)
+    editor.addAction({
+      id: "syncstream-quick-open",
+      label: "SyncStream: Quick Open File",
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP
+      ],
+      run: () => {
+        openQuickOpenRef.current?.()
+      }
+    })
+
+    // Global Search & Replace (Ctrl+Shift+F)
+    editor.addAction({
+      id: "syncstream-global-search",
+      label: "SyncStream: Global Search & Replace",
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF
+      ],
+      run: () => {
+        openSearchRef.current?.()
+      }
+    })
+
+    // Toggle Integrated Terminal (Ctrl+`)
+    const backtickKeyCode = monaco.KeyCode.US_BACKTICK || monaco.KeyCode.Backquote || 86
+    editor.addAction({
+      id: "syncstream-toggle-terminal",
+      label: "SyncStream: Toggle Integrated Terminal",
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | backtickKeyCode
+      ],
+      run: () => {
+        toggleTerminalRef.current?.()
+      }
+    })
+
+    // Toggle File Explorer / Sidebar (Ctrl+B)
+    editor.addAction({
+      id: "syncstream-toggle-sidebar",
+      label: "SyncStream: Toggle File Explorer / Sidebar",
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyB
+      ],
+      run: () => {
+        toggleSidebarRef.current?.()
+      }
+    })
+
+    // Toggle Word Wrap (Alt+Z)
+    editor.addAction({
+      id: "syncstream-toggle-word-wrap",
+      label: "SyncStream: Toggle Word Wrap",
+      keybindings: [
+        monaco.KeyMod.Alt | monaco.KeyCode.KeyZ
+      ],
+      run: () => {
+        handleToggleWordWrapRef.current?.()
+      }
+    })
+
+    // Run Diagnostics / Save (Ctrl+S)
+    editor.addAction({
+      id: "syncstream-run-diagnostics",
+      label: "SyncStream: Run Diagnostics & Validate",
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS
+      ],
+      run: () => {
+        validateCodeRef.current?.()
+      }
+    })
+
+    // Keyboard Shortcuts Reference Modal (Ctrl+/)
+    const slashKeyCode = monaco.KeyCode.US_SLASH || monaco.KeyCode.Slash || 85
+    editor.addAction({
+      id: "syncstream-shortcuts-modal",
+      label: "SyncStream: Keyboard Shortcuts Reference",
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | slashKeyCode
+      ],
+      run: () => {
+        toggleShortcutsRef.current?.()
       }
     })
 

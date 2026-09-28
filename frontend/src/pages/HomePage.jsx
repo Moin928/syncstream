@@ -326,7 +326,7 @@ export function HomePage({
           </div>
 
           {/* Viewport Content */}
-          <div className="grid grid-cols-1 md:grid-cols-12 min-h-[360px] bg-[#0d1117] font-mono text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-12 min-h-[360px] bg-[#0d1117] font-mono text-xs select-none">
             {/* File Explorer Sidebar */}
             <div className="hidden md:flex md:col-span-3 border-r border-[#21262d] bg-[#0d1117] flex-col">
               <div className="px-3 py-2 text-[11px] font-medium text-[#8b949e] border-b border-[#21262d]">
@@ -352,8 +352,14 @@ export function HomePage({
               <div className="mt-auto p-3 border-t border-[#21262d] bg-[#161b22]/40">
                 <div className="text-[11px] text-[#8b949e] mb-1.5">Participants</div>
                 <div className="space-y-1 text-xs">
-                  <div className="text-[#c9d1d9]">● Alex (You)</div>
-                  <div className="text-[#3fb950]">● Sarah (Line 12)</div>
+                  <div className="text-[#c9d1d9] flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#8b949e]" />
+                    <span>Alex (You)</span>
+                  </div>
+                  <div className="text-[#c9d1d9] flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#8b949e]" />
+                    <span>Sarah (Line 12)</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -482,13 +488,43 @@ export function HomePage({
               )}
 
               {activeTab === "tree" && (
-                <div className="p-5 bg-[#090d13] font-mono text-xs flex-1 space-y-1.5 text-[#c9d1d9]">
-                  <div>📁 project/</div>
-                  <div className="pl-4">📄 index.html</div>
-                  <div className="pl-4">📁 src/</div>
-                  <div className="pl-8 text-[#58a6ff]">📄 crdt_sync.ts</div>
-                  <div className="pl-8">📄 server.go</div>
-                  <div className="pl-4">📄 package.json</div>
+                <div className="p-5 bg-[#090d13] font-mono text-xs flex-1 space-y-2 text-[#c9d1d9]">
+                  <div className="flex items-center gap-1.5 text-[#8b949e]">
+                    <svg className="w-3.5 h-3.5 text-[#8b949e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    <span>project/</span>
+                  </div>
+                  <div className="pl-4 flex items-center gap-1.5 text-[#8b949e]">
+                    <svg className="w-3.5 h-3.5 text-[#8b949e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span>index.html</span>
+                  </div>
+                  <div className="pl-4 flex items-center gap-1.5 text-[#8b949e]">
+                    <svg className="w-3.5 h-3.5 text-[#8b949e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    <span>src/</span>
+                  </div>
+                  <div className="pl-8 flex items-center gap-1.5 text-[#58a6ff]">
+                    <svg className="w-3.5 h-3.5 text-[#58a6ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span>crdt_sync.ts</span>
+                  </div>
+                  <div className="pl-8 flex items-center gap-1.5 text-[#8b949e]">
+                    <svg className="w-3.5 h-3.5 text-[#8b949e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span>server.go</span>
+                  </div>
+                  <div className="pl-4 flex items-center gap-1.5 text-[#8b949e]">
+                    <svg className="w-3.5 h-3.5 text-[#8b949e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span>package.json</span>
+                  </div>
                 </div>
               )}
 
@@ -513,51 +549,51 @@ export function HomePage({
       {/* ── Interactive React Bits Bento Grid ─────────────────────────── */}
       <section
         id="architecture"
-        className="border-t border-[#21262d] bg-[#0d1117] py-16"
+        className="border-t border-[#21262d] bg-[#0d1117] py-10 sm:py-12"
         aria-labelledby="arch-heading"
       >
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="max-w-2xl mb-10">
+          <div className="max-w-2xl mb-6">
             <h2
               id="arch-heading"
-              className="text-xl sm:text-2xl font-semibold text-[#f0f6fc] mb-2"
+              className="text-xl sm:text-2xl font-semibold text-[#f0f6fc] mb-1.5"
             >
               Interactive Architecture Sandbox
             </h2>
-            <p className="text-sm text-[#8b949e]">
+            <p className="text-xs sm:text-sm text-[#8b949e]">
               Test real-time CRDT propagation, terminal execution, and language diagnostics live.
             </p>
           </div>
 
           {/* Bento Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
             {/* Bento Card 1: 2-column span -> Interactive CRDT Merge Simulator */}
-            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between">
+            <SpotlightCard className="md:col-span-2 p-4 sm:p-5 flex flex-col justify-between">
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-base font-semibold text-[#f0f6fc]">
+                <div className="flex items-center justify-between mb-1.5">
+                  <h3 className="text-sm sm:text-base font-semibold text-[#f0f6fc]">
                     Conflict-Free Document Merging
                   </h3>
                   <button
                     type="button"
                     onClick={() => setCrdtSimStep((s) => (s + 1) % 3)}
-                    className="text-xs font-mono text-[#58a6ff] hover:text-[#79c0ff] px-2 py-1 rounded bg-[#0d1117] border border-[#30363d] cursor-pointer"
+                    className="text-xs font-mono text-[#58a6ff] hover:text-[#79c0ff] px-2 py-0.5 rounded bg-[#0d1117] border border-[#30363d] cursor-pointer"
                   >
                     Simulate Edit ({crdtSimStep + 1}/3)
                   </button>
                 </div>
-                <p className="text-xs sm:text-sm text-[#8b949e] leading-relaxed max-w-xl mb-4">
+                <p className="text-xs text-[#8b949e] leading-relaxed max-w-xl mb-3">
                   Local keystrokes apply instantly on the client and propagate as binary delta vectors over WebSockets without central locks.
                 </p>
 
                 {/* Live CRDT Data flow simulator */}
-                <div className="p-3 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs space-y-2">
+                <div className="p-2.5 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs space-y-1.5 select-none">
                   <div className="flex items-center justify-between text-[#8b949e] text-[11px] pb-1 border-b border-[#21262d]">
                     <span>Peer A (Client)</span>
                     <span className="text-[#3fb950]">Delta &lt;14ms RTT</span>
                     <span>Peer B (Remote)</span>
                   </div>
-                  <div className="text-[#c9d1d9] leading-relaxed">
+                  <div className="text-[#c9d1d9] leading-relaxed text-[11px]">
                     {crdtSimStep === 0 && (
                       <div>
                         <span className="text-[#ff7b72]">const</span> buffer = <span className="text-[#a5d6ff]">"sync_init"</span>;{" "}
@@ -579,30 +615,26 @@ export function HomePage({
                   </div>
                 </div>
               </div>
-
-              <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
-                Binary state vector encoding · Y.Doc
-              </div>
             </SpotlightCard>
 
             {/* Bento Card 2: 1-column span -> Interactive Terminal Runner */}
-            <SpotlightCard className="p-6 flex flex-col justify-between">
+            <SpotlightCard className="p-4 sm:p-5 flex flex-col justify-between">
               <div>
-                <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
+                <h3 className="text-sm sm:text-base font-semibold text-[#f0f6fc] mb-1.5">
                   Interactive Terminal (PTY)
                 </h3>
-                <p className="text-xs text-[#8b949e] leading-relaxed mb-3">
+                <p className="text-xs text-[#8b949e] leading-relaxed mb-2.5">
                   Click a command to simulate real-time stdout streaming:
                 </p>
 
                 {/* Command Trigger Buttons */}
-                <div className="flex flex-wrap gap-1.5 mb-3">
+                <div className="flex flex-wrap gap-1.5 mb-2.5">
                   {["npm test", "go run main.go", "cargo build"].map((c) => (
                     <button
                       key={c}
                       type="button"
                       onClick={() => handleRunTermCmd(c)}
-                      className={`px-2 py-1 rounded text-[11px] font-mono transition-colors cursor-pointer ${
+                      className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors cursor-pointer ${
                         termOutput.cmd === c
                           ? "bg-[#21262d] text-[#58a6ff] border border-[#30363d]"
                           : "bg-[#0d1117] text-[#8b949e] hover:text-[#c9d1d9] border border-[#21262d]"
@@ -614,29 +646,25 @@ export function HomePage({
                 </div>
 
                 {/* Simulated Mini Terminal Console */}
-                <div className="p-3 rounded bg-[#0d1117] border border-[#21262d] font-mono text-[11px] leading-5 text-[#8b949e]">
+                <div className="p-2.5 rounded bg-[#0d1117] border border-[#21262d] font-mono text-[11px] leading-relaxed text-[#8b949e] select-none">
                   <div className="text-[#f0f6fc]">
                     <span className="text-[#3fb950]">$</span> {termOutput.cmd}
                   </div>
                   {termOutput.logs.map((log, i) => (
-                    <div key={i} className="text-[#c9d1d9]">
+                    <div key={i} className="text-[#c9d1d9] truncate">
                       {log}
                     </div>
                   ))}
-                  <div className="text-[#58a6ff] text-[10px] pt-1">{termOutput.exit}</div>
+                  <div className="text-[#58a6ff] text-[10px] pt-0.5">{termOutput.exit}</div>
                 </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
-                Shared pseudoterminal multiplexer
               </div>
             </SpotlightCard>
 
             {/* Bento Card 3: 1-column span -> Storage Mode Toggle */}
-            <SpotlightCard className="p-6 flex flex-col justify-between">
+            <SpotlightCard className="p-4 sm:p-5 flex flex-col justify-between">
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-base font-semibold text-[#f0f6fc]">
+                <div className="flex items-center justify-between mb-1.5">
+                  <h3 className="text-sm sm:text-base font-semibold text-[#f0f6fc]">
                     Storage & Retention
                   </h3>
                   <div className="flex items-center gap-1 bg-[#0d1117] p-0.5 rounded border border-[#30363d]">
@@ -666,49 +694,45 @@ export function HomePage({
                 </div>
 
                 {storageMode === "guest" ? (
-                  <div className="p-3 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs text-[#8b949e] space-y-1.5 mt-2">
-                    <div className="text-[#d29922] font-semibold">● 15-Minute TTL Policy</div>
-                    <div>Auto-purged on inactivity</div>
-                    <div>RAM-only session storage</div>
-                    <div>Zero residual database footprint</div>
+                  <div className="p-2.5 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs text-[#8b949e] space-y-1 mt-1.5 select-none">
+                    <div className="text-[#f0f6fc] font-medium text-[11px]">15-Minute Inactivity Policy</div>
+                    <div className="text-[11px]">Auto-purged on inactivity</div>
+                    <div className="text-[11px]">RAM-only session storage</div>
+                    <div className="text-[11px]">Zero residual database footprint</div>
                   </div>
                 ) : (
-                  <div className="p-3 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs text-[#8b949e] space-y-1.5 mt-2">
-                    <div className="text-[#3fb950] font-semibold">● Permanent Persistence</div>
-                    <div>Cloud database backup</div>
-                    <div>Access across all devices</div>
-                    <div>Shared workspace history</div>
+                  <div className="p-2.5 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs text-[#8b949e] space-y-1 mt-1.5 select-none">
+                    <div className="text-[#f0f6fc] font-medium text-[11px]">Persistent Cloud Storage</div>
+                    <div className="text-[11px]">Cloud database backup</div>
+                    <div className="text-[11px]">Access across all devices</div>
+                    <div className="text-[11px]">Shared workspace history</div>
                   </div>
                 )}
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
-                Automated lifecycle scheduler
               </div>
             </SpotlightCard>
 
             {/* Bento Card 4: 2-column span -> Interactive Monaco Diagnostic Inspector */}
-            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between">
+            <SpotlightCard className="md:col-span-2 p-4 sm:p-5 flex flex-col justify-between">
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-base font-semibold text-[#f0f6fc]">
+                <div className="flex items-center justify-between mb-1.5">
+                  <h3 className="text-sm sm:text-base font-semibold text-[#f0f6fc]">
                     Compiler Diagnostics & AST Linting
                   </h3>
                   <button
                     type="button"
                     onClick={() => setDiagErrorActive((v) => !v)}
-                    className="text-xs font-mono text-[#58a6ff] hover:text-[#79c0ff] px-2 py-1 rounded bg-[#0d1117] border border-[#30363d] cursor-pointer"
+                    className="text-xs font-mono text-[#58a6ff] hover:text-[#79c0ff] px-2 py-0.5 rounded bg-[#0d1117] border border-[#30363d] cursor-pointer"
                   >
                     {diagErrorActive ? "Fix TypeError" : "Trigger TypeError"}
                   </button>
                 </div>
-                <p className="text-xs sm:text-sm text-[#8b949e] leading-relaxed max-w-xl mb-3">
+                <p className="text-xs text-[#8b949e] leading-relaxed max-w-xl mb-2.5">
                   Real-time error markers, type definitions, and auto-completion directly in the browser Monaco editor.
                 </p>
 
                 {/* Simulated Diagnostic Tooltip */}
-                <div className="p-3 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs space-y-2">
-                  <div className="text-[#c9d1d9]">
+                <div className="p-2.5 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs space-y-1.5 select-none">
+                  <div className="text-[#c9d1d9] text-[11px]">
                     <span className="text-[#ff7b72]">function</span>{" "}
                     <span className="text-[#d2a8ff]">calculateMetrics</span>
                     <span className="text-[#8b949e]">(</span>
@@ -728,32 +752,28 @@ export function HomePage({
                     {"}"}
                   </div>
                   {diagErrorActive && (
-                    <div className="p-2 rounded bg-[#161b22] border border-[#f85149]/40 text-[11px] text-[#f85149]">
+                    <div className="p-1.5 rounded bg-[#161b22] border border-[#f85149]/40 text-[10px] text-[#f85149]">
                       TS2322: Type 'number' is not assignable to type 'string'.
                     </div>
                   )}
                 </div>
               </div>
-
-              <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
-                Monaco AST diagnostics integration
-              </div>
             </SpotlightCard>
 
             {/* Bento Card 5: 1-column span -> Interactive Language Snippet Switcher */}
-            <SpotlightCard className="p-6 flex flex-col justify-between">
+            <SpotlightCard className="p-4 sm:p-5 flex flex-col justify-between">
               <div>
-                <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
+                <h3 className="text-sm sm:text-base font-semibold text-[#f0f6fc] mb-1.5">
                   15+ Native Runtimes
                 </h3>
                 {/* Language Switcher Tabs */}
-                <div className="flex flex-wrap gap-1 mb-2.5">
+                <div className="flex flex-wrap gap-1 mb-2">
                   {Object.keys(languageSnippets).map((k) => (
                     <button
                       key={k}
                       type="button"
                       onClick={() => setActiveLangSnippet(k)}
-                      className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors cursor-pointer ${
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors cursor-pointer ${
                         activeLangSnippet === k
                           ? "bg-[#21262d] text-[#58a6ff] border border-[#30363d]"
                           : "bg-[#0d1117] text-[#8b949e] border border-[#21262d]"
@@ -765,58 +785,81 @@ export function HomePage({
                 </div>
 
                 {/* Code Preview */}
-                <pre className="p-2.5 rounded bg-[#0d1117] border border-[#21262d] font-mono text-[11px] text-[#c9d1d9] leading-relaxed overflow-x-auto h-24">
+                <pre className="p-2 rounded bg-[#0d1117] border border-[#21262d] font-mono text-[10px] text-[#c9d1d9] leading-relaxed overflow-x-auto h-20 select-none">
                   {languageSnippets[activeLangSnippet].code}
                 </pre>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
-                Instant environment switching
               </div>
             </SpotlightCard>
 
             {/* Bento Card 6: 2-column span -> Interactive Virtual Filesystem */}
-            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between">
+            <SpotlightCard className="md:col-span-2 p-4 sm:p-5 flex flex-col justify-between">
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-base font-semibold text-[#f0f6fc]">
+                <div className="flex items-center justify-between mb-1.5">
+                  <h3 className="text-sm sm:text-base font-semibold text-[#f0f6fc]">
                     Virtual File Tree & ZIP Portability
                   </h3>
                   <button
                     type="button"
                     onClick={handleZipSimulate}
-                    className="text-xs font-mono text-[#58a6ff] hover:text-[#79c0ff] px-2.5 py-1 rounded bg-[#0d1117] border border-[#30363d] cursor-pointer"
+                    className="text-xs font-mono text-[#58a6ff] hover:text-[#79c0ff] px-2 py-0.5 rounded bg-[#0d1117] border border-[#30363d] cursor-pointer"
                   >
                     {zipExporting ? "Bundling workspace.zip..." : "Simulate Export (.zip)"}
                   </button>
                 </div>
-                <p className="text-xs sm:text-sm text-[#8b949e] leading-relaxed max-w-xl mb-3">
+                <p className="text-xs text-[#8b949e] leading-relaxed max-w-xl mb-2.5">
                   Organize multi-file projects with nested folder hierarchies, search & replace, and export your entire workspace as a standard ZIP archive.
                 </p>
 
                 {/* Interactive File Tree Strip */}
-                <div className="p-3 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs text-[#c9d1d9] space-y-1">
+                <div className="p-2.5 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs text-[#c9d1d9] space-y-1 select-none">
                   <div
                     onClick={() => setTreeFolderOpen((v) => !v)}
-                    className="cursor-pointer text-[#8b949e] hover:text-[#f0f6fc] flex items-center gap-1 select-none"
+                    className="cursor-pointer text-[#8b949e] hover:text-[#f0f6fc] flex items-center gap-1.5 select-none text-[11px]"
                   >
-                    <span>{treeFolderOpen ? "▼" : "▶"}</span>
-                    <span>📁 src/</span>
+                    <svg
+                      className={`w-3 h-3 text-[#8b949e] transition-transform duration-150 ${treeFolderOpen ? "rotate-90" : ""}`}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                    <svg className="w-3.5 h-3.5 text-[#8b949e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    <span>src/</span>
                     <span className="text-[10px] text-[#6e7681]">(3 files)</span>
                   </div>
                   {treeFolderOpen && (
-                    <div className="pl-5 space-y-1 text-xs">
-                      <div className="text-[#58a6ff]">📄 crdt_sync.ts</div>
-                      <div className="text-[#c9d1d9]">📄 main.tsx</div>
-                      <div className="text-[#8b949e]">📄 styles.css</div>
+                    <div className="pl-6 space-y-1 text-[11px]">
+                      <div className="text-[#58a6ff] flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-[#58a6ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <span>crdt_sync.ts</span>
+                      </div>
+                      <div className="text-[#c9d1d9] flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-[#8b949e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <span>main.tsx</span>
+                      </div>
+                      <div className="text-[#8b949e] flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-[#8b949e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <span>styles.css</span>
+                      </div>
                     </div>
                   )}
-                  <div className="text-[#c9d1d9]">📄 package.json</div>
+                  <div className="text-[#c9d1d9] flex items-center gap-1.5 pl-4 text-[11px]">
+                    <svg className="w-3 h-3 text-[#8b949e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span>package.json</span>
+                  </div>
                 </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
-                In-memory virtual directory tree · JSZip export
               </div>
             </SpotlightCard>
           </div>
