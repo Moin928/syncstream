@@ -35,7 +35,7 @@ export function HomePage({
   }
 
   return (
-    <div className="min-h-screen bg-[#090d13] text-[#f0f6fc] font-sans antialiased selection:bg-[#1f6feb] selection:text-white">
+    <div className="w-full min-h-screen overflow-y-auto bg-[#090d13] text-[#f0f6fc] font-sans antialiased selection:bg-[#1f6feb] selection:text-white">
       {/* ── Top Navigation Bar ────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 border-b border-[#21262d] bg-[#0d1117]">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-13 flex items-center justify-between">
@@ -186,9 +186,9 @@ export function HomePage({
           <div className="flex flex-wrap items-center justify-between px-3 py-2 bg-[#161b22] border-b border-[#30363d] gap-2">
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#30363d]" />
-                <span className="w-2.5 h-2.5 rounded-full bg-[#30363d]" />
-                <span className="w-2.5 h-2.5 rounded-full bg-[#30363d]" />
+                <span className="w-3 h-3 rounded-full bg-[#ff5f56] border border-[#e0443e]/40" title="Close" />
+                <span className="w-3 h-3 rounded-full bg-[#ffbd2e] border border-[#dea123]/40" title="Minimize" />
+                <span className="w-3 h-3 rounded-full bg-[#27c93f] border border-[#1aab29]/40" title="Maximize" />
               </div>
 
               <div className="flex items-center gap-1 border-l border-[#30363d] pl-3">
