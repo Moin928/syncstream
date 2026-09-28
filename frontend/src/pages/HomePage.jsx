@@ -44,7 +44,7 @@ function SpotlightCard({
 
 /**
  * SyncStream – Technical Overview & Landing Page
- * Clean, developer-focused interface with React Bits Bento Grid architecture overview.
+ * Interactive Bento Grid with live micro-sandboxes, terminal runner, and diagnostics.
  */
 export function HomePage({
   onStartRoom,
@@ -58,6 +58,19 @@ export function HomePage({
   const [activeTab, setActiveTab] = useState("editor") // "editor" | "terminal" | "tree" | "preview"
   const [copiedCurl, setCopiedCurl] = useState(false)
   const [inlineRoomId, setInlineRoomId] = useState("")
+
+  // Interactive Bento Grid States
+  const [crdtSimStep, setCrdtSimStep] = useState(0)
+  const [termOutput, setTermOutput] = useState({
+    cmd: "npm test",
+    logs: ["✓ tests/crdt.spec.ts (4 passed in 12ms)", "✓ tests/websocket.spec.ts (6 passed in 18ms)", "Tests: 10 passed, 10 total"],
+    exit: "Exit code: 0 (Success)",
+  })
+  const [storageMode, setStorageMode] = useState("guest") // "guest" | "account"
+  const [diagErrorActive, setDiagErrorActive] = useState(false)
+  const [activeLangSnippet, setActiveLangSnippet] = useState("typescript")
+  const [treeFolderOpen, setTreeFolderOpen] = useState(true)
+  const [zipExporting, setZipExporting] = useState(false)
 
   const handleCopyCurl = () => {
     navigator.clipboard.writeText(
@@ -74,6 +87,56 @@ export function HomePage({
     } else {
       onJoinRoom()
     }
+  }
+
+  const handleRunTermCmd = (cmd) => {
+    if (cmd === "npm test") {
+      setTermOutput({
+        cmd: "npm test",
+        logs: ["✓ tests/crdt.spec.ts (4 passed in 12ms)", "✓ tests/websocket.spec.ts (6 passed in 18ms)", "Tests: 10 passed, 10 total"],
+        exit: "Exit code: 0 (Success)",
+      })
+    } else if (cmd === "go run main.go") {
+      setTermOutput({
+        cmd: "go run main.go",
+        logs: ["[server] Listening on :8080", "[ws] Handshake verified for peer #194", "[crdt] Document ready"],
+        exit: "Process active · 2 connections",
+      })
+    } else if (cmd === "cargo build") {
+      setTermOutput({
+        cmd: "cargo build --release",
+        logs: ["Compiling syncstream v0.1.0", "Finished release [optimized] target in 0.42s"],
+        exit: "Build finished (0 errors)",
+      })
+    }
+  }
+
+  const handleZipSimulate = () => {
+    setZipExporting(true)
+    setTimeout(() => setZipExporting(false), 1600)
+  }
+
+  const languageSnippets = {
+    typescript: {
+      name: "TypeScript",
+      code: 'import * as Y from "yjs"\nconst doc = new Y.Doc()\nconst text = doc.getText("code")\ntext.insert(0, "console.log(42)")',
+    },
+    python: {
+      name: "Python",
+      code: 'import asyncio\nasync def main():\n    print("SyncStream Python 3 runtime active")\nasyncio.run(main())',
+    },
+    go: {
+      name: "Go",
+      code: 'package main\nimport "fmt"\nfunc main() {\n    fmt.Println("Zero-dependency Go 1.22 runtime")\n}',
+    },
+    rust: {
+      name: "Rust",
+      code: 'fn main() -> Result<(), Box<dyn std::error::Error>> {\n    println!("Native WebAssembly & Rust compilation");\n    Ok(())\n}',
+    },
+    cpp: {
+      name: "C++",
+      code: '#include <iostream>\nint main() {\n    std::cout << "GCC 13 C++20 Sandbox" << std::endl;\n    return 0;\n}',
+    },
   }
 
   return (
@@ -447,7 +510,7 @@ export function HomePage({
         </div>
       </section>
 
-      {/* ── React Bits Bento Grid: Architecture & Capabilities ───────── */}
+      {/* ── Interactive React Bits Bento Grid ─────────────────────────── */}
       <section
         id="architecture"
         className="border-t border-[#21262d] bg-[#0d1117] py-16"
@@ -459,108 +522,301 @@ export function HomePage({
               id="arch-heading"
               className="text-xl sm:text-2xl font-semibold text-[#f0f6fc] mb-2"
             >
-              Architecture & Capabilities
+              Interactive Architecture Sandbox
             </h2>
             <p className="text-sm text-[#8b949e]">
-              Engineered for low latency, isolated execution, and real-time pair programming.
+              Test real-time CRDT propagation, terminal execution, and language diagnostics live.
             </p>
           </div>
 
           {/* Bento Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Bento Card 1: 2-column span -> CRDT Engine */}
-            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between min-h-[190px]">
+            {/* Bento Card 1: 2-column span -> Interactive CRDT Merge Simulator */}
+            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between">
               <div>
-                <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
-                  Conflict-Free Document Merging
-                </h3>
-                <p className="text-xs sm:text-sm text-[#8b949e] leading-relaxed max-w-xl">
-                  Local edits apply immediately on the client and propagate as binary delta vectors over WebSockets. Concurrent operations merge deterministically without central server locks.
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-base font-semibold text-[#f0f6fc]">
+                    Conflict-Free Document Merging
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setCrdtSimStep((s) => (s + 1) % 3)}
+                    className="text-xs font-mono text-[#58a6ff] hover:text-[#79c0ff] px-2 py-1 rounded bg-[#0d1117] border border-[#30363d] cursor-pointer"
+                  >
+                    Simulate Edit ({crdtSimStep + 1}/3)
+                  </button>
+                </div>
+                <p className="text-xs sm:text-sm text-[#8b949e] leading-relaxed max-w-xl mb-4">
+                  Local keystrokes apply instantly on the client and propagate as binary delta vectors over WebSockets without central locks.
                 </p>
+
+                {/* Live CRDT Data flow simulator */}
+                <div className="p-3 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs space-y-2">
+                  <div className="flex items-center justify-between text-[#8b949e] text-[11px] pb-1 border-b border-[#21262d]">
+                    <span>Peer A (Client)</span>
+                    <span className="text-[#3fb950]">Delta &lt;14ms RTT</span>
+                    <span>Peer B (Remote)</span>
+                  </div>
+                  <div className="text-[#c9d1d9] leading-relaxed">
+                    {crdtSimStep === 0 && (
+                      <div>
+                        <span className="text-[#ff7b72]">const</span> buffer = <span className="text-[#a5d6ff]">"sync_init"</span>;{" "}
+                        <span className="text-[#3fb950]">// synced</span>
+                      </div>
+                    )}
+                    {crdtSimStep === 1 && (
+                      <div>
+                        <span className="text-[#ff7b72]">const</span> buffer = <span className="text-[#a5d6ff]">"sync_init"</span>;{"\n"}
+                        <span className="text-[#58a6ff]">doc.getText("editor").insert(12, " [Peer A +4b]")</span>
+                      </div>
+                    )}
+                    {crdtSimStep === 2 && (
+                      <div>
+                        <span className="text-[#ff7b72]">const</span> buffer = <span className="text-[#a5d6ff]">"sync_init_merged"</span>;{"\n"}
+                        <span className="text-[#3fb950]">✓ Resolved deterministic state: Yjs Vector [12, 4, 8]</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
               <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
-                State vector delta encoding · Yjs CRDT engine
+                Binary state vector encoding · Y.Doc
               </div>
             </SpotlightCard>
 
-            {/* Bento Card 2: 1-column span -> Terminal & PTY */}
-            <SpotlightCard className="p-6 flex flex-col justify-between min-h-[190px]">
+            {/* Bento Card 2: 1-column span -> Interactive Terminal Runner */}
+            <SpotlightCard className="p-6 flex flex-col justify-between">
               <div>
                 <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
-                  Interactive Terminal & PTY
+                  Interactive Terminal (PTY)
                 </h3>
-                <p className="text-xs text-[#8b949e] leading-relaxed">
-                  Real-time pseudoterminal multiplexed across all peers with full ANSI color support and process signal control.
+                <p className="text-xs text-[#8b949e] leading-relaxed mb-3">
+                  Click a command to simulate real-time stdout streaming:
                 </p>
+
+                {/* Command Trigger Buttons */}
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {["npm test", "go run main.go", "cargo build"].map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => handleRunTermCmd(c)}
+                      className={`px-2 py-1 rounded text-[11px] font-mono transition-colors cursor-pointer ${
+                        termOutput.cmd === c
+                          ? "bg-[#21262d] text-[#58a6ff] border border-[#30363d]"
+                          : "bg-[#0d1117] text-[#8b949e] hover:text-[#c9d1d9] border border-[#21262d]"
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Simulated Mini Terminal Console */}
+                <div className="p-3 rounded bg-[#0d1117] border border-[#21262d] font-mono text-[11px] leading-5 text-[#8b949e]">
+                  <div className="text-[#f0f6fc]">
+                    <span className="text-[#3fb950]">$</span> {termOutput.cmd}
+                  </div>
+                  {termOutput.logs.map((log, i) => (
+                    <div key={i} className="text-[#c9d1d9]">
+                      {log}
+                    </div>
+                  ))}
+                  <div className="text-[#58a6ff] text-[10px] pt-1">{termOutput.exit}</div>
+                </div>
               </div>
 
               <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
-                Shared pseudoterminal streaming
+                Shared pseudoterminal multiplexer
               </div>
             </SpotlightCard>
 
-            {/* Bento Card 3: 1-column span -> Ephemeral Lifecycle */}
-            <SpotlightCard className="p-6 flex flex-col justify-between min-h-[190px]">
+            {/* Bento Card 3: 1-column span -> Storage Mode Toggle */}
+            <SpotlightCard className="p-6 flex flex-col justify-between">
               <div>
-                <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
-                  Ephemeral Guest Workspaces
-                </h3>
-                <p className="text-xs text-[#8b949e] leading-relaxed">
-                  Guest rooms automatically purge after 15 minutes of inactivity with zero residual server footprint. Registered accounts retain persistent storage.
-                </p>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-base font-semibold text-[#f0f6fc]">
+                    Storage & Retention
+                  </h3>
+                  <div className="flex items-center gap-1 bg-[#0d1117] p-0.5 rounded border border-[#30363d]">
+                    <button
+                      type="button"
+                      onClick={() => setStorageMode("guest")}
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono cursor-pointer ${
+                        storageMode === "guest"
+                          ? "bg-[#21262d] text-[#f0f6fc]"
+                          : "text-[#8b949e]"
+                      }`}
+                    >
+                      Guest
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStorageMode("account")}
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono cursor-pointer ${
+                        storageMode === "account"
+                          ? "bg-[#21262d] text-[#58a6ff]"
+                          : "text-[#8b949e]"
+                      }`}
+                    >
+                      Account
+                    </button>
+                  </div>
+                </div>
+
+                {storageMode === "guest" ? (
+                  <div className="p-3 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs text-[#8b949e] space-y-1.5 mt-2">
+                    <div className="text-[#d29922] font-semibold">● 15-Minute TTL Policy</div>
+                    <div>Auto-purged on inactivity</div>
+                    <div>RAM-only session storage</div>
+                    <div>Zero residual database footprint</div>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs text-[#8b949e] space-y-1.5 mt-2">
+                    <div className="text-[#3fb950] font-semibold">● Permanent Persistence</div>
+                    <div>Cloud database backup</div>
+                    <div>Access across all devices</div>
+                    <div>Shared workspace history</div>
+                  </div>
+                )}
               </div>
 
               <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
-                15-minute inactivity TTL cleanup
+                Automated lifecycle scheduler
               </div>
             </SpotlightCard>
 
-            {/* Bento Card 4: 2-column span -> AST & Language Diagnostics */}
-            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between min-h-[190px]">
+            {/* Bento Card 4: 2-column span -> Interactive Monaco Diagnostic Inspector */}
+            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between">
               <div>
-                <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
-                  In-Browser Compiler Diagnostics & Linting
-                </h3>
-                <p className="text-xs sm:text-sm text-[#8b949e] leading-relaxed max-w-xl">
-                  Real-time error squiggles, syntax completions, keyword auto-suggestions, and document formatting for Python, TypeScript, Java, C++, Go, and Rust.
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-base font-semibold text-[#f0f6fc]">
+                    Compiler Diagnostics & AST Linting
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setDiagErrorActive((v) => !v)}
+                    className="text-xs font-mono text-[#58a6ff] hover:text-[#79c0ff] px-2 py-1 rounded bg-[#0d1117] border border-[#30363d] cursor-pointer"
+                  >
+                    {diagErrorActive ? "Fix TypeError" : "Trigger TypeError"}
+                  </button>
+                </div>
+                <p className="text-xs sm:text-sm text-[#8b949e] leading-relaxed max-w-xl mb-3">
+                  Real-time error markers, type definitions, and auto-completion directly in the browser Monaco editor.
                 </p>
+
+                {/* Simulated Diagnostic Tooltip */}
+                <div className="p-3 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs space-y-2">
+                  <div className="text-[#c9d1d9]">
+                    <span className="text-[#ff7b72]">function</span>{" "}
+                    <span className="text-[#d2a8ff]">calculateMetrics</span>
+                    <span className="text-[#8b949e]">(</span>
+                    <span className="text-[#ffa657]">rtt</span>:{" "}
+                    <span className="text-[#79c0ff]">number</span>
+                    <span className="text-[#8b949e]">)</span>:{" "}
+                    <span className="text-[#79c0ff]">string</span> {"{"}{"\n"}
+                    {"  "}<span className="text-[#ff7b72]">return</span>{" "}
+                    {diagErrorActive ? (
+                      <span className="border-b-2 border-dashed border-[#f85149] text-[#f85149]">
+                        rtt * 1.5
+                      </span>
+                    ) : (
+                      <span className="text-[#a5d6ff]">`Latency: ${"{"}rtt{"}"}ms`</span>
+                    )}
+                    ;{"\n"}
+                    {"}"}
+                  </div>
+                  {diagErrorActive && (
+                    <div className="p-2 rounded bg-[#161b22] border border-[#f85149]/40 text-[11px] text-[#f85149]">
+                      TS2322: Type 'number' is not assignable to type 'string'.
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
-                Monaco language server integration
+                Monaco AST diagnostics integration
               </div>
             </SpotlightCard>
 
-            {/* Bento Card 5: 1-column span -> Runtimes */}
-            <SpotlightCard className="p-6 flex flex-col justify-between min-h-[190px]">
+            {/* Bento Card 5: 1-column span -> Interactive Language Snippet Switcher */}
+            <SpotlightCard className="p-6 flex flex-col justify-between">
               <div>
                 <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
-                  15+ Language Environments
+                  15+ Native Runtimes
                 </h3>
-                <p className="text-xs text-[#8b949e] leading-relaxed">
-                  Pre-configured execution environments for Python 3, TypeScript, Go, Rust, C++, Java, and SQL with zero local setup.
-                </p>
+                {/* Language Switcher Tabs */}
+                <div className="flex flex-wrap gap-1 mb-2.5">
+                  {Object.keys(languageSnippets).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setActiveLangSnippet(k)}
+                      className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors cursor-pointer ${
+                        activeLangSnippet === k
+                          ? "bg-[#21262d] text-[#58a6ff] border border-[#30363d]"
+                          : "bg-[#0d1117] text-[#8b949e] border border-[#21262d]"
+                      }`}
+                    >
+                      {languageSnippets[k].name}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Code Preview */}
+                <pre className="p-2.5 rounded bg-[#0d1117] border border-[#21262d] font-mono text-[11px] text-[#c9d1d9] leading-relaxed overflow-x-auto h-24">
+                  {languageSnippets[activeLangSnippet].code}
+                </pre>
               </div>
 
               <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
-                Python · TypeScript · Go · Rust · C++ · Java
+                Instant environment switching
               </div>
             </SpotlightCard>
 
-            {/* Bento Card 6: 2-column span -> Virtual File Tree */}
-            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between min-h-[190px]">
+            {/* Bento Card 6: 2-column span -> Interactive Virtual Filesystem */}
+            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between">
               <div>
-                <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
-                  Virtual File Tree & ZIP Portability
-                </h3>
-                <p className="text-xs sm:text-sm text-[#8b949e] leading-relaxed">
-                  Organize multi-file projects with nested directories, global search & replace, and export your entire workspace as a standard ZIP bundle.
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-base font-semibold text-[#f0f6fc]">
+                    Virtual File Tree & ZIP Portability
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={handleZipSimulate}
+                    className="text-xs font-mono text-[#58a6ff] hover:text-[#79c0ff] px-2.5 py-1 rounded bg-[#0d1117] border border-[#30363d] cursor-pointer"
+                  >
+                    {zipExporting ? "Bundling workspace.zip..." : "Simulate Export (.zip)"}
+                  </button>
+                </div>
+                <p className="text-xs sm:text-sm text-[#8b949e] leading-relaxed max-w-xl mb-3">
+                  Organize multi-file projects with nested folder hierarchies, search & replace, and export your entire workspace as a standard ZIP archive.
                 </p>
+
+                {/* Interactive File Tree Strip */}
+                <div className="p-3 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs text-[#c9d1d9] space-y-1">
+                  <div
+                    onClick={() => setTreeFolderOpen((v) => !v)}
+                    className="cursor-pointer text-[#8b949e] hover:text-[#f0f6fc] flex items-center gap-1 select-none"
+                  >
+                    <span>{treeFolderOpen ? "▼" : "▶"}</span>
+                    <span>📁 src/</span>
+                    <span className="text-[10px] text-[#6e7681]">(3 files)</span>
+                  </div>
+                  {treeFolderOpen && (
+                    <div className="pl-5 space-y-1 text-xs">
+                      <div className="text-[#58a6ff]">📄 crdt_sync.ts</div>
+                      <div className="text-[#c9d1d9]">📄 main.tsx</div>
+                      <div className="text-[#8b949e]">📄 styles.css</div>
+                    </div>
+                  )}
+                  <div className="text-[#c9d1d9]">📄 package.json</div>
+                </div>
               </div>
 
               <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
-                In-memory virtual directory tree · Export .zip
+                In-memory virtual directory tree · JSZip export
               </div>
             </SpotlightCard>
           </div>
