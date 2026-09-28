@@ -1,8 +1,50 @@
-import { useState } from "react"
+import { useState, useRef } from "react"
+
+/**
+ * SpotlightCard component inspired by React Bits (reactbits.dev).
+ * Tracks cursor proximity and renders a smooth radial spotlight on dark surface.
+ */
+function SpotlightCard({
+  children,
+  className = "",
+  spotlightColor = "rgba(88, 166, 255, 0.08)",
+}) {
+  const divRef = useRef(null)
+  const [position, setPosition] = useState({ x: 0, y: 0 })
+  const [opacity, setOpacity] = useState(0)
+
+  const handleMouseMove = (e) => {
+    if (!divRef.current) return
+    const rect = divRef.current.getBoundingClientRect()
+    setPosition({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+  }
+
+  const handleMouseEnter = () => setOpacity(1)
+  const handleMouseLeave = () => setOpacity(0)
+
+  return (
+    <div
+      ref={divRef}
+      onMouseMove={handleMouseMove}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      className={`relative rounded-md border border-[#30363d] bg-[#161b22] overflow-hidden transition-colors ${className}`}
+    >
+      <div
+        className="pointer-events-none absolute -inset-px transition-opacity duration-300 z-0"
+        style={{
+          opacity,
+          background: `radial-gradient(350px circle at ${position.x}px ${position.y}px, ${spotlightColor}, transparent 80%)`,
+        }}
+      />
+      <div className="relative z-10 h-full flex flex-col">{children}</div>
+    </div>
+  )
+}
 
 /**
  * SyncStream – Technical Overview & Landing Page
- * Clean, developer-focused interface without decorative badges or generic marketing patterns.
+ * Clean, developer-focused interface with React Bits Bento Grid architecture overview.
  */
 export function HomePage({
   onStartRoom,
@@ -91,7 +133,7 @@ export function HomePage({
 
             {isAuthenticated && user ? (
               <div className="flex items-center gap-2 pl-3 border-l border-[#30363d]">
-                <span className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold text-[#0d1117] bg-[#388bfd]">
+                <span className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-mono font-medium text-[#c9d1d9] bg-[#30363d]">
                   {(user.displayName || user.username).slice(0, 1).toUpperCase()}
                 </span>
                 <span className="text-xs text-[#c9d1d9] truncate max-w-[100px]">
@@ -405,7 +447,7 @@ export function HomePage({
         </div>
       </section>
 
-      {/* ── Architecture Section ────────────────────────────────────── */}
+      {/* ── React Bits Bento Grid: Architecture & Capabilities ───────── */}
       <section
         id="architecture"
         className="border-t border-[#21262d] bg-[#0d1117] py-16"
@@ -417,73 +459,147 @@ export function HomePage({
               id="arch-heading"
               className="text-xl sm:text-2xl font-semibold text-[#f0f6fc] mb-2"
             >
-              Architecture & Features
+              Architecture & Capabilities
             </h2>
             <p className="text-sm text-[#8b949e]">
-              Core capabilities built into the platform.
+              Engineered for low latency, isolated execution, and real-time pair programming.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="p-4 rounded bg-[#161b22] border border-[#30363d] flex flex-col gap-2">
-              <h3 className="text-xs font-semibold text-[#f0f6fc]">
-                Real-time CRDT Synchronization
-              </h3>
-              <p className="text-xs text-[#8b949e] leading-5">
-                Built on Yjs conflict-free replicated data types. Character-level
-                edits and remote cursors sync without central document locking.
-              </p>
-            </div>
+          {/* Bento Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Bento Card 1: 2-column span -> CRDT Engine */}
+            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between min-h-[220px]">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-mono text-[#58a6ff]">Yjs CRDT Engine</span>
+                  <span className="text-[10px] font-mono text-[#3fb950] bg-[#3fb950]/10 px-2 py-0.5 rounded border border-[#3fb950]/20">
+                    Sub-50ms sync
+                  </span>
+                </div>
+                <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
+                  Conflict-Free Document Merging
+                </h3>
+                <p className="text-xs sm:text-sm text-[#8b949e] leading-relaxed max-w-xl">
+                  Local edits apply immediately on the client and propagate as binary delta vectors over WebSockets. Concurrent operations merge deterministically without central server locks.
+                </p>
+              </div>
 
-            <div className="p-4 rounded bg-[#161b22] border border-[#30363d] flex flex-col gap-2">
-              <h3 className="text-xs font-semibold text-[#f0f6fc]">
-                Shared Terminal & PTY
-              </h3>
-              <p className="text-xs text-[#8b949e] leading-5">
-                Interactive shell session streamed over WebSocket with ANSI
-                formatting, standard I/O routing, and process controls.
-              </p>
-            </div>
+              <div className="mt-4 pt-3 border-t border-[#21262d] flex items-center justify-between text-xs font-mono text-[#6e7681]">
+                <span className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#3fb950]" />
+                  <span>State vector delta encoding</span>
+                </span>
+                <span>Y.Doc · MonacoBinding</span>
+              </div>
+            </SpotlightCard>
 
-            <div className="p-4 rounded bg-[#161b22] border border-[#30363d] flex flex-col gap-2">
-              <h3 className="text-xs font-semibold text-[#f0f6fc]">
-                Ephemeral Guest Sessions
-              </h3>
-              <p className="text-xs text-[#8b949e] leading-5">
-                Rooms created without an account are purged after 15 minutes of
-                inactivity. Signed-in users retain persistent workspaces.
-              </p>
-            </div>
+            {/* Bento Card 2: 1-column span -> Terminal & PTY */}
+            <SpotlightCard className="p-6 flex flex-col justify-between min-h-[220px]">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-mono text-[#58a6ff]">PTY Stream</span>
+                  <span className="text-[10px] font-mono text-[#c9d1d9] bg-[#21262d] px-2 py-0.5 rounded">
+                    xterm.js
+                  </span>
+                </div>
+                <h3 className="text-sm font-semibold text-[#f0f6fc] mb-1.5">
+                  Interactive Terminal
+                </h3>
+                <p className="text-xs text-[#8b949e] leading-relaxed">
+                  Real-time pseudoterminal multiplexed across all peers with full ANSI color support and process signal control.
+                </p>
+              </div>
 
-            <div className="p-4 rounded bg-[#161b22] border border-[#30363d] flex flex-col gap-2">
-              <h3 className="text-xs font-semibold text-[#f0f6fc]">
-                In-Browser IntelliSense
-              </h3>
-              <p className="text-xs text-[#8b949e] leading-5">
-                Syntax diagnostics, auto-completions, and error markers for
-                Python, Java, C++, Go, Rust, and JavaScript.
-              </p>
-            </div>
+              <div className="mt-4 p-2.5 rounded bg-[#0d1117] border border-[#21262d] font-mono text-[11px] text-[#8b949e]">
+                <span className="text-[#3fb950]">$</span> go run main.go{"\n"}
+                <span className="text-[#58a6ff]">&gt;</span> server :8080 [ready]
+              </div>
+            </SpotlightCard>
 
-            <div className="p-4 rounded bg-[#161b22] border border-[#30363d] flex flex-col gap-2">
-              <h3 className="text-xs font-semibold text-[#f0f6fc]">
-                15+ Programming Runtimes
-              </h3>
-              <p className="text-xs text-[#8b949e] leading-5">
-                Preconfigured templates and execution support for Python,
-                Node.js, TypeScript, Go, Rust, C++, Java, C#, SQL, and Ruby.
-              </p>
-            </div>
+            {/* Bento Card 3: 1-column span -> Ephemeral Lifecycle */}
+            <SpotlightCard className="p-6 flex flex-col justify-between min-h-[220px]">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-mono text-[#58a6ff]">Lifecycle</span>
+                  <span className="text-[10px] font-mono text-[#d29922] bg-[#d29922]/10 px-2 py-0.5 rounded border border-[#d29922]/20">
+                    15m TTL
+                  </span>
+                </div>
+                <h3 className="text-sm font-semibold text-[#f0f6fc] mb-1.5">
+                  Ephemeral Guest Mode
+                </h3>
+                <p className="text-xs text-[#8b949e] leading-relaxed">
+                  Guest rooms automatically purge after 15 minutes of inactivity with zero residual server footprint. Registered users get permanent workspace persistence.
+                </p>
+              </div>
 
-            <div className="p-4 rounded bg-[#161b22] border border-[#30363d] flex flex-col gap-2">
-              <h3 className="text-xs font-semibold text-[#f0f6fc]">
-                Virtual Filesystem & ZIP Export
-              </h3>
-              <p className="text-xs text-[#8b949e] leading-5">
-                Multi-file project tree with nested folders, workspace search,
-                and one-click ZIP archive export and import.
-              </p>
-            </div>
+              <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
+                Auto garbage collection scheduler
+              </div>
+            </SpotlightCard>
+
+            {/* Bento Card 4: 2-column span -> AST & Language Diagnostics */}
+            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between min-h-[220px]">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-mono text-[#58a6ff]">Language Services</span>
+                  <span className="text-[10px] font-mono text-[#58a6ff] bg-[#58a6ff]/10 px-2 py-0.5 rounded border border-[#58a6ff]/20">
+                    Monaco AST
+                  </span>
+                </div>
+                <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
+                  In-Browser Compiler Diagnostics & Linting
+                </h3>
+                <p className="text-xs sm:text-sm text-[#8b949e] leading-relaxed max-w-xl">
+                  Real-time error squiggles, syntax completions, keyword auto-suggestions, and document formatting for Python, TypeScript, Java, C++, Go, and Rust.
+                </p>
+              </div>
+
+              <div className="mt-4 p-2.5 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs text-[#c9d1d9] flex items-center justify-between">
+                <span>fn evaluate() -&gt; Result&lt;()&gt;</span>
+                <span className="text-[11px] text-[#3fb950]">0 Errors · Clean</span>
+              </div>
+            </SpotlightCard>
+
+            {/* Bento Card 5: 1-column span -> Runtimes */}
+            <SpotlightCard className="p-6 flex flex-col justify-between min-h-[200px]">
+              <div>
+                <span className="text-xs font-mono text-[#58a6ff] mb-2 block">Runtimes</span>
+                <h3 className="text-sm font-semibold text-[#f0f6fc] mb-1.5">
+                  15+ Language Environments
+                </h3>
+                <p className="text-xs text-[#8b949e] leading-relaxed">
+                  Pre-configured templates for Python 3, TypeScript, Go 1.22, Rust, C++20, Java 21, and SQL.
+                </p>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-1 text-[10px] font-mono">
+                {["Python", "Go", "Rust", "C++", "Java", "TS", "SQL"].map((lang) => (
+                  <span key={lang} className="px-2 py-0.5 rounded bg-[#0d1117] border border-[#21262d] text-[#8b949e]">
+                    {lang}
+                  </span>
+                ))}
+              </div>
+            </SpotlightCard>
+
+            {/* Bento Card 6: 2-column span -> Virtual File Tree */}
+            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between min-h-[200px]">
+              <div>
+                <span className="text-xs font-mono text-[#58a6ff] mb-2 block">Filesystem</span>
+                <h3 className="text-base font-semibold text-[#f0f6fc] mb-1.5">
+                  Virtual File Tree & ZIP Archive Portability
+                </h3>
+                <p className="text-xs sm:text-sm text-[#8b949e] leading-relaxed">
+                  Organize multi-file projects with nested directories, global search & replace, and export your entire workspace as a standard ZIP bundle.
+                </p>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-[#21262d] flex items-center justify-between text-xs font-mono text-[#8b949e]">
+                <span>In-memory virtual directory tree</span>
+                <span className="text-[#58a6ff]">Export .zip</span>
+              </div>
+            </SpotlightCard>
           </div>
         </div>
       </section>
