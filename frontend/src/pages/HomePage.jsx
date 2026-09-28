@@ -469,14 +469,8 @@ export function HomePage({
           {/* Bento Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Bento Card 1: 2-column span -> CRDT Engine */}
-            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between min-h-[220px]">
+            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between min-h-[190px]">
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-mono text-[#58a6ff]">Yjs CRDT Engine</span>
-                  <span className="text-[10px] font-mono text-[#3fb950] bg-[#3fb950]/10 px-2 py-0.5 rounded border border-[#3fb950]/20">
-                    Sub-50ms sync
-                  </span>
-                </div>
                 <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
                   Conflict-Free Document Merging
                 </h3>
@@ -485,69 +479,46 @@ export function HomePage({
                 </p>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-[#21262d] flex items-center justify-between text-xs font-mono text-[#6e7681]">
-                <span className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#3fb950]" />
-                  <span>State vector delta encoding</span>
-                </span>
-                <span>Y.Doc · MonacoBinding</span>
+              <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
+                State vector delta encoding · Yjs CRDT engine
               </div>
             </SpotlightCard>
 
             {/* Bento Card 2: 1-column span -> Terminal & PTY */}
-            <SpotlightCard className="p-6 flex flex-col justify-between min-h-[220px]">
+            <SpotlightCard className="p-6 flex flex-col justify-between min-h-[190px]">
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-mono text-[#58a6ff]">PTY Stream</span>
-                  <span className="text-[10px] font-mono text-[#c9d1d9] bg-[#21262d] px-2 py-0.5 rounded">
-                    xterm.js
-                  </span>
-                </div>
-                <h3 className="text-sm font-semibold text-[#f0f6fc] mb-1.5">
-                  Interactive Terminal
+                <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
+                  Interactive Terminal & PTY
                 </h3>
                 <p className="text-xs text-[#8b949e] leading-relaxed">
                   Real-time pseudoterminal multiplexed across all peers with full ANSI color support and process signal control.
                 </p>
               </div>
 
-              <div className="mt-4 p-2.5 rounded bg-[#0d1117] border border-[#21262d] font-mono text-[11px] text-[#8b949e]">
-                <span className="text-[#3fb950]">$</span> go run main.go{"\n"}
-                <span className="text-[#58a6ff]">&gt;</span> server :8080 [ready]
+              <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
+                Shared pseudoterminal streaming
               </div>
             </SpotlightCard>
 
             {/* Bento Card 3: 1-column span -> Ephemeral Lifecycle */}
-            <SpotlightCard className="p-6 flex flex-col justify-between min-h-[220px]">
+            <SpotlightCard className="p-6 flex flex-col justify-between min-h-[190px]">
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-mono text-[#58a6ff]">Lifecycle</span>
-                  <span className="text-[10px] font-mono text-[#d29922] bg-[#d29922]/10 px-2 py-0.5 rounded border border-[#d29922]/20">
-                    15m TTL
-                  </span>
-                </div>
-                <h3 className="text-sm font-semibold text-[#f0f6fc] mb-1.5">
-                  Ephemeral Guest Mode
+                <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
+                  Ephemeral Guest Workspaces
                 </h3>
                 <p className="text-xs text-[#8b949e] leading-relaxed">
-                  Guest rooms automatically purge after 15 minutes of inactivity with zero residual server footprint. Registered users get permanent workspace persistence.
+                  Guest rooms automatically purge after 15 minutes of inactivity with zero residual server footprint. Registered accounts retain persistent storage.
                 </p>
               </div>
 
               <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
-                Auto garbage collection scheduler
+                15-minute inactivity TTL cleanup
               </div>
             </SpotlightCard>
 
             {/* Bento Card 4: 2-column span -> AST & Language Diagnostics */}
-            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between min-h-[220px]">
+            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between min-h-[190px]">
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-mono text-[#58a6ff]">Language Services</span>
-                  <span className="text-[10px] font-mono text-[#58a6ff] bg-[#58a6ff]/10 px-2 py-0.5 rounded border border-[#58a6ff]/20">
-                    Monaco AST
-                  </span>
-                </div>
                 <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
                   In-Browser Compiler Diagnostics & Linting
                 </h3>
@@ -556,48 +527,40 @@ export function HomePage({
                 </p>
               </div>
 
-              <div className="mt-4 p-2.5 rounded bg-[#0d1117] border border-[#21262d] font-mono text-xs text-[#c9d1d9] flex items-center justify-between">
-                <span>fn evaluate() -&gt; Result&lt;()&gt;</span>
-                <span className="text-[11px] text-[#3fb950]">0 Errors · Clean</span>
+              <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
+                Monaco language server integration
               </div>
             </SpotlightCard>
 
             {/* Bento Card 5: 1-column span -> Runtimes */}
-            <SpotlightCard className="p-6 flex flex-col justify-between min-h-[200px]">
+            <SpotlightCard className="p-6 flex flex-col justify-between min-h-[190px]">
               <div>
-                <span className="text-xs font-mono text-[#58a6ff] mb-2 block">Runtimes</span>
-                <h3 className="text-sm font-semibold text-[#f0f6fc] mb-1.5">
+                <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
                   15+ Language Environments
                 </h3>
                 <p className="text-xs text-[#8b949e] leading-relaxed">
-                  Pre-configured templates for Python 3, TypeScript, Go 1.22, Rust, C++20, Java 21, and SQL.
+                  Pre-configured execution environments for Python 3, TypeScript, Go, Rust, C++, Java, and SQL with zero local setup.
                 </p>
               </div>
 
-              <div className="mt-4 flex flex-wrap gap-1 text-[10px] font-mono">
-                {["Python", "Go", "Rust", "C++", "Java", "TS", "SQL"].map((lang) => (
-                  <span key={lang} className="px-2 py-0.5 rounded bg-[#0d1117] border border-[#21262d] text-[#8b949e]">
-                    {lang}
-                  </span>
-                ))}
+              <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
+                Python · TypeScript · Go · Rust · C++ · Java
               </div>
             </SpotlightCard>
 
             {/* Bento Card 6: 2-column span -> Virtual File Tree */}
-            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between min-h-[200px]">
+            <SpotlightCard className="md:col-span-2 p-6 flex flex-col justify-between min-h-[190px]">
               <div>
-                <span className="text-xs font-mono text-[#58a6ff] mb-2 block">Filesystem</span>
-                <h3 className="text-base font-semibold text-[#f0f6fc] mb-1.5">
-                  Virtual File Tree & ZIP Archive Portability
+                <h3 className="text-base font-semibold text-[#f0f6fc] mb-2">
+                  Virtual File Tree & ZIP Portability
                 </h3>
                 <p className="text-xs sm:text-sm text-[#8b949e] leading-relaxed">
                   Organize multi-file projects with nested directories, global search & replace, and export your entire workspace as a standard ZIP bundle.
                 </p>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-[#21262d] flex items-center justify-between text-xs font-mono text-[#8b949e]">
-                <span>In-memory virtual directory tree</span>
-                <span className="text-[#58a6ff]">Export .zip</span>
+              <div className="mt-4 pt-3 border-t border-[#21262d] text-xs font-mono text-[#6e7681]">
+                In-memory virtual directory tree · Export .zip
               </div>
             </SpotlightCard>
           </div>
