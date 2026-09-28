@@ -3533,6 +3533,29 @@ function App() {
     return () => window.removeEventListener("click", handleGlobalClick)
   }, [])
 
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search)
+      const urlRoom = params.get("room") || ""
+      const urlUser = params.get("username") || ""
+      const isJoined = Boolean(urlRoom && urlUser)
+
+      setRoom(urlRoom)
+      setUsername(urlUser)
+      setJoined(isJoined)
+      setShowLobby(Boolean(urlRoom && !urlUser))
+      if (!isJoined) {
+        setDocumentReady(false)
+        setUsers([])
+        setTerminalOpen(false)
+        setPreviewOpen(false)
+      }
+    }
+
+    window.addEventListener("popstate", handlePopState)
+    return () => window.removeEventListener("popstate", handlePopState)
+  }, [])
+
   const handleLeaveRoom = () => {
     setJoined(false)
     setUsername("")
@@ -4250,41 +4273,30 @@ function App() {
             </div>
           )}
 
-          {/* Collaborator Presence Avatar Stack */}
-          {users.length > 0 && (
-            <div className="flex items-center -space-x-1.5 mr-1" title={`${users.length} collaborator${users.length === 1 ? "" : "s"} online`}>
-              {users.slice(0, 6).map((u) => {
-                const uColor = getUserColor(u.username)
-                return (
-                  <div
-                    key={u.clientId || u.username}
-                    className="presence-avatar-circle"
-                    style={{ backgroundColor: uColor }}
-                    title={`${u.username} (${rolesMap[u.username] || "editor"})`}
-                  >
-                    {(u.username || "U").charAt(0).toUpperCase()}
-                  </div>
-                )
-              })}
-              {users.length > 6 && (
-                <div
-                  className="presence-avatar-circle bg-[#21262d] text-[#8b949e]"
-                  title={`${users.length - 6} more collaborators`}
-                >
-                  +{users.length - 6}
-                </div>
-              )}
-            </div>
+          {/* Collaborators counter (clean button to open sidebar) */}
+          {users.length > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveActivityTab("collaborators")
+                setSidebarOpen(true)
+              }}
+              className="flex items-center gap-1.5 px-2 py-1 rounded bg-[#0d1117] border border-[#30363d] text-xs text-[#8b949e] hover:text-[#c9d1d9] hover:border-[#8b949e] transition cursor-pointer"
+              title={`${users.length} collaborators online`}
+            >
+              <svg className="w-3.5 h-3.5 text-[#8b949e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              <span>{users.length}</span>
+            </button>
           )}
 
-          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#0d1117] border border-[#30363d] text-[11px]">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                connectionState === "CONNECTED" ? "bg-[#3fb950]" : "bg-[#d29922]"
-              }`}
-            />
-            <span className="text-[#8b949e]">{username}</span>
-            <span className={`role-badge role-badge-${myRole}`}>{myRole}</span>
+          {/* User status and role */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#0d1117] border border-[#30363d] text-xs text-[#c9d1d9]">
+            <span className="text-[#c9d1d9] font-medium">{username}</span>
+            <span className="text-[10px] font-mono text-[#8b949e] bg-[#161b22] px-1 py-0.2 rounded border border-[#21262d] uppercase">
+              {myRole}
+            </span>
           </div>
 
           <UserMenu onOpenAuthModal={(m) => { setAuthModalMode(m); setAuthModalOpen(true); }} />

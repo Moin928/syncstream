@@ -50,10 +50,9 @@ export function UserMenu({ onOpenAuthModal }) {
         aria-expanded={open}
         className="flex items-center gap-1.5 px-2 py-1 rounded border border-[#30363d] bg-[#21262d] hover:bg-[#30363d] text-xs text-[#c9d1d9] transition-colors cursor-pointer"
       >
-        {/* Flat avatar swatch — no gradient, no glow ring */}
+        {/* Neutral avatar initials */}
         <span
-          className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold text-[#0d1117] flex-shrink-0"
-          style={{ backgroundColor: avatarColor(user.username) }}
+          className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-mono font-medium text-[#c9d1d9] bg-[#30363d] flex-shrink-0"
           aria-hidden
         >
           {initials}
