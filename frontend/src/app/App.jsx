@@ -22,6 +22,7 @@ import { AuthModal } from "../auth/AuthModal"
 import { UserMenu } from "../auth/UserMenu"
 import { HomePage } from "../pages/HomePage"
 import { AiAssistantModal } from "../components/AiAssistant"
+import { TestRunnerPanel } from "../components/TestRunner"
 
 function getLanguageFromFileName(filename) {
   if (!filename) return "javascript"
@@ -1917,6 +1918,14 @@ function App() {
 
       // Backspace (DEL)
       if (data === "\u007F" || data === "\b") {
+        if (isRunningRef.current) {
+          if (command.length > 0) {
+            command = command.slice(0, -1)
+            cursorPos = Math.max(0, cursorPos - 1)
+            terminal.write("\b \b")
+          }
+          return
+        }
         if (cursorPos > 0) {
           command = command.slice(0, cursorPos - 1) + command.slice(cursorPos)
           cursorPos--
@@ -2081,6 +2090,12 @@ function App() {
       if (data.length > 0 && !data.includes("\r") && !data.includes("\n")) {
         const cleanData = data.replace(/[\x00-\x1F\x7F]/g, "")
         if (cleanData.length > 0) {
+          if (isRunningRef.current) {
+            terminal.write(cleanData)
+            command += cleanData
+            cursorPos += cleanData.length
+            return
+          }
           command = command.slice(0, cursorPos) + cleanData + command.slice(cursorPos)
           cursorPos += cleanData.length
           renderLine()
@@ -6213,6 +6228,14 @@ function App() {
                       >
                         <span>Output</span>
                       </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setActiveBottomTab("tests")}
+                        className={`dock-tab ${activeBottomTab === "tests" ? "active" : ""}`}
+                      >
+                        <span>Tests</span>
+                      </button>
                     </div>
 
                     <div className="flex items-center gap-1">
@@ -6372,6 +6395,21 @@ function App() {
                     <div className="output-panel">
                       {outputLogs || "[No execution output. Click 'Run' to execute code.]"}
                     </div>
+                  )}
+
+                  {/* Tab 4: Tests */}
+                  {activeBottomTab === "tests" && (
+                    <TestRunnerPanel
+                      yfiles={yfiles}
+                      ydoc={ydoc}
+                      onOpenAiAssistant={handleOpenAiAssistant}
+                      onRunTerminalTest={() => {
+                        setActiveBottomTab("terminal")
+                        if (terminalSocketRef.current && terminalSocketRef.current.readyState === WebSocket.OPEN) {
+                          terminalSocketRef.current.send("npm test\r")
+                        }
+                      }}
+                    />
                   )}
                 </div>
               )}
