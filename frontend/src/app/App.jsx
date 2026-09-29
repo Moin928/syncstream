@@ -21,6 +21,7 @@ import { useAuth } from "../auth/AuthContext"
 import { AuthModal } from "../auth/AuthModal"
 import { UserMenu } from "../auth/UserMenu"
 import { HomePage } from "../pages/HomePage"
+import { AiAssistantModal } from "../components/AiAssistant"
 
 function getLanguageFromFileName(filename) {
   if (!filename) return "javascript"
@@ -539,6 +540,17 @@ function App() {
   // Mobile Header Action Menu Drawer
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
+  // AI Assistant Modal (Ctrl+K)
+  const [aiModalOpen, setAiModalOpen] = useState(false)
+  const [aiSelectedText, setAiSelectedText] = useState("")
+  const [aiFullCode, setAiFullCode] = useState("")
+
+  // Split-Pane Dual Editor (Ctrl+\)
+  const [splitEditorOpen, setSplitEditorOpen] = useState(false)
+  const [splitActiveFile, setSplitActiveFile] = useState("")
+  const splitEditorRef = useRef(null)
+  const splitMonacoBindingRef = useRef(null)
+
   const languageRef = useRef(language)
   const validateCodeRef = useRef(null)
   const isRunningRef = useRef(isRunning)
@@ -554,6 +566,8 @@ function App() {
   const toggleSidebarRef = useRef(null)
   const openSearchRef = useRef(null)
   const toggleShortcutsRef = useRef(null)
+  const openAiAssistantRef = useRef(null)
+  const toggleSplitEditorRef = useRef(null)
 
   useEffect(() => {
     followingUserRef.current = followingUser
@@ -1026,6 +1040,39 @@ function App() {
       bindEditorToFile(activeFile)
     }
   }, [activeFile, bindEditorToFile])
+
+  /*
+   * Bind Secondary Split Monaco Editor to the selected split file.
+   */
+  const bindSplitEditorToFile = useCallback((fileName) => {
+    if (!splitEditorRef.current || !monacoRef.current || !fileName) return
+    const editor = splitEditorRef.current
+    const monaco = monacoRef.current
+
+    if (splitMonacoBindingRef.current) {
+      splitMonacoBindingRef.current.destroy()
+      splitMonacoBindingRef.current = null
+    }
+
+    const fileYText = ydoc.getText("file:" + fileName)
+    const fileLang = getLanguageFromFileName(fileName)
+
+    const model = editor.getModel()
+    if (model) {
+      monaco.editor.setModelLanguage(model, fileLang)
+      splitMonacoBindingRef.current = new MonacoBinding(
+        fileYText,
+        model,
+        new Set([editor])
+      )
+    }
+  }, [ydoc])
+
+  useEffect(() => {
+    if (splitEditorRef.current && monacoRef.current && splitActiveFile && splitEditorOpen) {
+      bindSplitEditorToFile(splitActiveFile)
+    }
+  }, [splitActiveFile, splitEditorOpen, bindSplitEditorToFile])
 
   /*
    * Initialize workspace files upon document sync.
@@ -2174,17 +2221,70 @@ function App() {
     setWordWrap((prev) => (prev === "on" ? "off" : "on"))
   }, [])
 
-  useEffect(() => {
-    handleRunCodeRef.current = handleRunCode
-  }, [handleRunCode])
+  const handleOpenAiAssistant = useCallback((initialPrompt = "") => {
+    if (!editorRef.current) return
+    const editor = editorRef.current
+    const selection = editor.getSelection()
+    const model = editor.getModel()
+    const selected = selection && !selection.isEmpty() ? model?.getValueInRange(selection) : ""
+    setAiSelectedText(selected || "")
+    setAiFullCode(model ? model.getValue() : "")
+    setAiModalOpen(true)
+  }, [])
+
+  const handleApplyAiTransform = useCallback((newCode, isSelectionOnly) => {
+    if (!editorRef.current || !activeFile) return
+    const editor = editorRef.current
+    const selection = editor.getSelection()
+    const model = editor.getModel()
+    if (!model) return
+
+    if (isSelectionOnly && selection && !selection.isEmpty()) {
+      editor.executeEdits("ai-assistant", [
+        {
+          range: selection,
+          text: newCode,
+          forceMoveMarkers: true
+        }
+      ])
+    } else {
+      const activeYText = ydoc.getText("file:" + activeFile)
+      ydoc.transact(() => {
+        activeYText.delete(0, activeYText.length)
+        activeYText.insert(0, newCode)
+      })
+    }
+    setTimeout(() => {
+      validateCodeRef.current?.()
+    }, 100)
+  }, [activeFile, ydoc])
+
+  const handleToggleSplitEditor = useCallback(() => {
+    setSplitEditorOpen((prev) => {
+      const next = !prev
+      if (next && !splitActiveFile) {
+        // Pick an alternate open tab if available
+        const otherTab = openTabs.find((t) => t !== activeFile)
+        setSplitActiveFile(otherTab || activeFile)
+      }
+      return next
+    })
+  }, [activeFile, openTabs, splitActiveFile])
+
+  const handleSplitMount = (editor, monaco) => {
+    splitEditorRef.current = editor
+    if (splitActiveFile) {
+      bindSplitEditorToFile(splitActiveFile)
+    }
+  }
 
   useEffect(() => {
-    handleFormatCodeRef.current = handleFormatCode
-  }, [handleFormatCode])
+    openAiAssistantRef.current = handleOpenAiAssistant
+  }, [handleOpenAiAssistant])
 
   useEffect(() => {
-    handleToggleWordWrapRef.current = handleToggleWordWrap
-  }, [handleToggleWordWrap])
+    toggleSplitEditorRef.current = handleToggleSplitEditor
+  }, [handleToggleSplitEditor])
 
   /*
    * Command Palette Available Actions & Shortcuts
@@ -2501,6 +2601,20 @@ function App() {
         return
       }
 
+      // Ctrl+K : Open AI Assistant Modal
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && (event.key === "k" || event.key === "K" || event.code === "KeyK")) {
+        event.preventDefault()
+        handleOpenAiAssistant()
+        return
+      }
+
+      // Ctrl+\ : Toggle Split Editor
+      if ((event.ctrlKey || event.metaKey) && (event.key === "\\" || event.code === "Backslash")) {
+        event.preventDefault()
+        handleToggleSplitEditor()
+        return
+      }
+
       // Ctrl+Enter or F5: Run Code
       if (((event.ctrlKey || event.metaKey) && event.key === "Enter") || event.key === "F5") {
         event.preventDefault()
@@ -2739,6 +2853,30 @@ function App() {
       ],
       run: () => {
         toggleShortcutsRef.current?.()
+      }
+    })
+
+    // AI Code Assistant (Ctrl+K)
+    editor.addAction({
+      id: "syncstream-ai-assistant",
+      label: "SyncStream: AI Code Assistant",
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK
+      ],
+      run: () => {
+        openAiAssistantRef.current?.()
+      }
+    })
+
+    // Toggle Split Editor (Ctrl+\)
+    editor.addAction({
+      id: "syncstream-split-editor",
+      label: "SyncStream: Toggle Split Editor",
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.Backslash
+      ],
+      run: () => {
+        toggleSplitEditorRef.current?.()
       }
     })
 
@@ -5642,6 +5780,35 @@ function App() {
                   </div>
 
                   <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAiAssistant()}
+                      className="px-2 py-0.5 rounded text-[11px] font-medium bg-[#1f6feb]/20 hover:bg-[#1f6feb]/30 text-[#58a6ff] border border-[#388bfd]/30 transition flex items-center gap-1 cursor-pointer"
+                      title="AI Code Assistant (Ctrl+K)"
+                    >
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                      </svg>
+                      <span>AI Assist</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleToggleSplitEditor}
+                      className={`px-2 py-0.5 rounded text-[11px] font-medium border transition flex items-center gap-1 cursor-pointer ${
+                        splitEditorOpen
+                          ? "bg-[#1f6feb] text-white border-[#388bfd]"
+                          : "bg-[#21262d] text-[#c9d1d9] hover:bg-[#30363d] border-[#30363d]"
+                      }`}
+                      title="Toggle Split Editor (Ctrl+\)"
+                    >
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <line x1="12" y1="3" x2="12" y2="21" />
+                      </svg>
+                      <span>{splitEditorOpen ? "Close Split" : "Split Right"}</span>
+                    </button>
+
                     {(activeFile.endsWith(".md") || activeFile.endsWith(".markdown")) && (
                       <button
                         type="button"
@@ -5663,7 +5830,7 @@ function App() {
                     <button
                       type="button"
                       onClick={handleFormatCode}
-                      className="px-2 py-0.5 rounded text-[11px] text-[#8b949e] hover:text-[#c9d1d9] bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] transition"
+                      className="px-2 py-0.5 rounded text-[11px] text-[#8b949e] hover:text-[#c9d1d9] bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] transition cursor-pointer"
                       title="Format Document (Shift+Alt+F)"
                     >
                       Format
@@ -5694,9 +5861,87 @@ function App() {
                       <span>Search</span>
                     </div>
                   </div>
+                ) : splitEditorOpen ? (
+                  /* Dual Split Editor Panes Side-by-Side */
+                  <div className="flex-1 min-h-0 flex flex-row w-full overflow-hidden">
+                    {/* Primary Left Editor Pane */}
+                    <div className="flex-1 min-h-0 flex flex-col border-r border-[#30363d]">
+                      <div className="h-7 bg-[#161b22] border-b border-[#30363d] px-3 flex items-center text-xs text-[#58a6ff] font-mono select-none">
+                        <span>{activeFile}</span>
+                      </div>
+                      <div className="flex-1 min-h-0">
+                        <Editor
+                          height="100%"
+                          language={language}
+                          defaultValue=""
+                          theme={editorTheme}
+                          onMount={handleMount}
+                          options={{
+                            automaticLayout: true,
+                            minimap: { enabled: false },
+                            scrollBeyondLastLine: false,
+                            fontSize: editorFontSize,
+                            fontFamily: "Consolas, 'Menlo', monospace",
+                            tabSize: tabSize,
+                            wordWrap: wordWrap,
+                            readOnly: isViewer
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Secondary Right Split Editor Pane */}
+                    <div className="flex-1 min-h-0 flex flex-col bg-[#0d1117]">
+                      <div className="h-7 bg-[#161b22] border-b border-[#30363d] px-2.5 flex items-center justify-between text-xs select-none">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-[#8b949e]">Split:</span>
+                          <select
+                            value={splitActiveFile || activeFile}
+                            onChange={(e) => setSplitActiveFile(e.target.value)}
+                            className="bg-[#0d1117] text-[#58a6ff] border border-[#30363d] rounded px-2 py-0.5 text-xs font-mono focus:outline-none"
+                          >
+                            {Array.from(yfiles.keys())
+                              .filter((f) => !f.endsWith(".keep") || yfiles.size === 1)
+                              .map((f) => (
+                                <option key={f} value={f}>
+                                  {f}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSplitEditorOpen(false)}
+                          className="text-xs text-[#8b949e] hover:text-[#f0f6fc] px-1.5 py-0.5 rounded hover:bg-[#21262d] transition"
+                          title="Close Split (Ctrl+\)"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <div className="flex-1 min-h-0">
+                        <Editor
+                          height="100%"
+                          language={getLanguageFromFileName(splitActiveFile || activeFile)}
+                          defaultValue=""
+                          theme={editorTheme}
+                          onMount={handleSplitMount}
+                          options={{
+                            automaticLayout: true,
+                            minimap: { enabled: false },
+                            scrollBeyondLastLine: false,
+                            fontSize: editorFontSize,
+                            fontFamily: "Consolas, 'Menlo', monospace",
+                            tabSize: tabSize,
+                            wordWrap: wordWrap,
+                            readOnly: isViewer
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
                 ) : (
                   <>
-                    {/* Monaco Editor */}
+                    {/* Standard Single Monaco Editor */}
                     <div className={(previewOpen || (markdownPreviewOpen && (activeFile?.endsWith(".md") || activeFile?.endsWith(".markdown")))) ? "w-1/2 min-h-0 flex flex-col" : "flex-1 min-h-0 flex flex-col"}>
                       <Editor
                         height="100%"
@@ -6101,6 +6346,21 @@ function App() {
                             <span className="text-[11px] text-[#8b949e]">
                               [{prob.startLineNumber}, {prob.startColumn}]
                             </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleProblemClick(prob)
+                                handleOpenAiAssistant(`Fix this problem in ${activeFile}: "${prob.message}" at line ${prob.startLineNumber}`)
+                              }}
+                              className="ml-auto px-2 py-0.5 rounded bg-[#1f6feb]/20 hover:bg-[#1f6feb]/30 text-[#58a6ff] border border-[#388bfd]/30 text-[10px] font-medium flex items-center gap-1 cursor-pointer transition"
+                              title="Auto-fix with AI"
+                            >
+                              <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                              </svg>
+                              <span>AI Fix</span>
+                            </button>
                           </div>
                         ))
                       )}
@@ -6850,6 +7110,14 @@ function App() {
                 <div className="shortcut-category-card">
                   <span className="shortcut-category-title">Collaboration & Views</span>
                   <div className="shortcut-item-row">
+                    <span>AI Code Assistant</span>
+                    <kbd className="shortcut-kbd">Ctrl + K</kbd>
+                  </div>
+                  <div className="shortcut-item-row">
+                    <span>Toggle Split Editor</span>
+                    <kbd className="shortcut-kbd">Ctrl + \</kbd>
+                  </div>
+                  <div className="shortcut-item-row">
                     <span>Toggle Markdown Preview</span>
                     <kbd className="shortcut-kbd">Toolbar (.md)</kbd>
                   </div>
@@ -6975,6 +7243,17 @@ function App() {
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
         initialMode={authModalMode}
+      />
+
+      {/* 10. AI Code Assistant Modal (Ctrl+K) */}
+      <AiAssistantModal
+        isOpen={aiModalOpen}
+        onClose={() => setAiModalOpen(false)}
+        activeFile={activeFile}
+        language={language}
+        selectedText={aiSelectedText}
+        fullCode={aiFullCode}
+        onApply={handleApplyAiTransform}
       />
 
     </main>
